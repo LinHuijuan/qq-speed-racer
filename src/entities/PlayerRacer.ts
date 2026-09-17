@@ -1,0 +1,335 @@
+import * as THREE from 'three';
+import type { RaceInputFrame } from '../core/InputController';
+import type { Track } from '../game/Track';
+import type { ItemType } from '../systems/ItemSystem';
+import { Kart } from './Kart';
+
+export type KartTuning = {
+  maxSpeed: number;
+  boostSpeed: number;
+  acceleration: number;
+  brakePower: number;
+  turnRate: number;
+  grip: number;
+  driftTurnMultiplier: number;
+  driftFriction: number;
+  offTrackDrag: number;
+  wallBounce: number;
+  nitroDrain: number;
+  driftCharge: number;
+  boostPadStrength: number;
+  boostPadDuration: number;
+};
+
+export const PLAYER_TUNING: KartTuning = {
+  maxSpeed: 52,
+  boostSpeed: 78,
+  acceleration: 38,
+  brakePower: 48,
+  turnRate: 2.6,
+  grip: 10.5,
+  driftTurnMultiplier: 1.55,
+  driftFriction: 1.4,
+  offTrackDrag: 16,
+  wallBounce: 0.4,
+  nitroDrain: 0.32,
+  driftCharge: 0.52,
+  boostPadStrength: 1.2,
+  boostPadDuration: 1.4,
+};
+
+const MIN_SPEED_TO_DRIFT = 12;
+const NITRO_MAX = 1;
+
+export type DriftBoostLevel = 0 | 1 | 2 | 3;
+
+export class PlayerRacer {
+  readonly kart: Kart;
+  private readonly forward = new THREE.Vector3();
+  private readonly right = new THREE.Vector3();
+  private boostFlashHandler: (() => void) | null = null;
+  private driftCharge = 0;
+  private shieldTimer = 0;
+  private stunTimer = 0;
+  private slowTimer = 0;
+  private item: ItemType | null = null;
+
+  constructor(config?: { color: string; accent: string; name: string }) {
+    this.kart = new Kart({
+      color: config?.color ?? '#2a6cff',
+      accent: config?.accent ?? '#2de2ff',
+      name: config?.name ?? '你',
+    });
+  }
+
+  reset(track: Track): void {
+    const start = track.startTransform;
+    this.kart.reset(start.position, start.heading);
+    this.driftCharge = 0;
+    this.shieldTimer = 0;
+    this.stunTimer = 0;
+    this.slowTimer = 0;
+    this.item = null;
+  }
+
+  setBoostFlashHandler(handler: (() => void) | null): void {
+    this.boostFlashHandler = handler;
+  }
+
+  getItem(): ItemType | null {
+    return this.item;
+  }
+
+  setItem(item: ItemType | null): void {
+    this.item = item;
+  }
+
+  hasShield(): boolean {
+    return this.shieldTimer > 0;
+  }
+
+  applyShield(duration = 3): void {
+    this.shieldTimer = Math.max(this.shieldTimer, duration);
+  }
+
+  applyMissileHit(): boolean {
+    if (this.shieldTimer > 0) {
+      this.shieldTimer = 0;
+      return false;
+    }
+    this.stunTimer = 1.1;
+    this.slowTimer = 2.2;
+    this.kart.state.speed *= 0.35;
+    return true;
+  }
+
+  applyMineHit(): boolean {
+    if (this.shieldTimer > 0) {
+      this.shieldTimer = 0;
+      return false;
+    }
+    this.stunTimer = 0.7;
+    this.slowTimer = 1.6;
+    this.kart.state.speed *= 0.45;
+    return true;
+  }
+
+  getDriftChargeLevel(): DriftBoostLevel {
+    if (this.driftCharge >= 0.75) return 3;
+    if (this.driftCharge >= 0.45) return 2;
+    if (this.driftCharge >= 0.2) return 1;
+    return 0;
+  }
+
+  getDriftCharge(): number {
+    return this.driftCharge;
+  }
+
+  /** Snap kart back onto the racing surface at the nearest track point. */
+  resetToTrack(track: Track): void {
+    const state = this.kart.state;
+    const t = track.projectProgress(state.position, state.progress);
+    const sample = track.sampleAt(t);
+    state.position.copy(sample.position);
+    state.position.y = 0;
+    state.heading = Math.atan2(sample.tangent.x, sample.tangent.z);
+    state.velocity.set(0, 0, 0);
+    state.lateralSpeed = 0;
+    state.driftAngle = 0;
+    state.isDrifting = false;
+    state.offTrack = false;
+    state.progress = t;
+    // Keep some momentum so it doesn't feel like a full stop
+    state.speed = Math.min(state.speed, PLAYER_TUNING.maxSpeed * 0.55);
+    state.speed = Math.max(state.speed, 12);
+    this.kart.syncTransform(0);
+  }
+
+  /** Snap the kart back onto the racing surface at the nearest sample. */
+  respawnOnTrack(track: Track): void {
+    const state = this.kart.state;
+    const sample = track.sampleAt(state.progress);
+    state.position.copy(sample.position);
+    state.position.y = 0;
+    state.heading = Math.atan2(sample.tangent.x, sample.tangent.z);
+    state.velocity.set(0, 0, 0);
+    state.lateralSpeed = 0;
+    state.driftAngle = 0;
+    state.isDrifting = false;
+    state.offTrack = false;
+    state.speed = Math.max(state.speed * 0.55, 12);
+    this.driftCharge = 0;
+    this.kart.syncTransform(0);
+  }
+
+  update(
+    delta: number,
+    input: RaceInputFrame,
+    track: Track,
+    canControl: boolean,
+    previousProgress: number,
+    useItem: boolean,
+  ): { nitroUsed: boolean; boostPad: boolean; firedItem: ItemType | null; driftBoost: DriftBoostLevel } {
+    const state = this.kart.state;
+    this.shieldTimer = Math.max(0, this.shieldTimer - delta);
+    this.stunTimer = Math.max(0, this.stunTimer - delta);
+    this.slowTimer = Math.max(0, this.slowTimer - delta);
+
+    let firedItem: ItemType | null = null;
+    if (useItem && this.item && this.stunTimer <= 0) {
+      firedItem = this.item;
+      this.item = null;
+      if (firedItem === 'turbo') {
+        state.boostTimer = Math.max(state.boostTimer, 1.6);
+        state.isBoosting = true;
+        state.speed = Math.max(state.speed, PLAYER_TUNING.boostSpeed * 0.75);
+      } else if (firedItem === 'shield') {
+        this.applyShield(3.5);
+      }
+      this.boostFlashHandler?.();
+    }
+
+    if (state.finished) {
+      state.speed = Math.max(0, state.speed - 12 * delta);
+      this.applyVelocityFromHeading(delta);
+      this.resolveTrack(delta, track, previousProgress);
+      this.kart.syncTransform(delta);
+      return { nitroUsed: false, boostPad: false, firedItem, driftBoost: 0 };
+    }
+
+    const stunned = this.stunTimer > 0;
+    const throttle = canControl && !stunned ? input.throttle : 0;
+    const brake = canControl && !stunned ? input.brake : 0;
+    const steer = canControl && !stunned ? input.steer : 0;
+    const wantDrift = canControl && !stunned && input.drift;
+    const wantNitro = canControl && !stunned && input.nitro;
+
+    if (state.boostTimer > 0) {
+      state.boostTimer = Math.max(0, state.boostTimer - delta);
+    }
+
+    let nitroUsed = false;
+    if (wantNitro && state.nitro > 0.05 && state.boostTimer <= 0.05) {
+      state.isBoosting = true;
+      state.nitro = Math.max(0, state.nitro - PLAYER_TUNING.nitroDrain * delta);
+      nitroUsed = true;
+    } else if (state.boostTimer > 0) {
+      state.isBoosting = true;
+    } else {
+      state.isBoosting = false;
+    }
+
+    // Drift store — hold drift to charge, release for a mini turbo
+    const canDrift = wantDrift && state.speed > MIN_SPEED_TO_DRIFT && Math.abs(steer) > 0.12;
+    let driftBoost: DriftBoostLevel = 0;
+    if (canDrift && !state.isDrifting) {
+      state.isDrifting = true;
+      state.driftAngle = Math.sign(steer) * 0.25;
+      this.driftCharge = 0;
+    } else if (!wantDrift && state.isDrifting) {
+      driftBoost = this.getDriftChargeLevel();
+      if (driftBoost > 0) {
+        const strength = 0.35 + driftBoost * 0.28;
+        state.boostTimer = Math.max(state.boostTimer, strength);
+        state.isBoosting = true;
+        state.speed = Math.max(state.speed, PLAYER_TUNING.maxSpeed * (0.95 + driftBoost * 0.04));
+        this.boostFlashHandler?.();
+      }
+      state.isDrifting = false;
+      this.driftCharge = 0;
+    }
+
+    const turnScale = THREE.MathUtils.clamp(1.2 - state.speed / 90, 0.48, 1.15);
+    // Chase camera looks along +Z, so world +X is screen-LEFT.
+    // Left key must increase heading (nose → +X = screen left).
+    const turn = -steer * PLAYER_TUNING.turnRate * turnScale;
+    if (state.isDrifting) {
+      state.heading += turn * PLAYER_TUNING.driftTurnMultiplier * delta;
+      const targetDrift = THREE.MathUtils.clamp(-steer * 0.58, -0.72, 0.72);
+      state.driftAngle = THREE.MathUtils.damp(state.driftAngle, targetDrift, 4.8, delta);
+      this.driftCharge = Math.min(1, this.driftCharge + PLAYER_TUNING.driftCharge * Math.abs(steer) * delta);
+      state.nitro = Math.min(NITRO_MAX, state.nitro + PLAYER_TUNING.driftCharge * 0.7 * Math.abs(steer) * delta);
+    } else {
+      state.heading += turn * delta;
+      state.driftAngle = THREE.MathUtils.damp(state.driftAngle, 0, 7.5, delta);
+    }
+
+    const slowFactor = this.slowTimer > 0 ? 0.72 : 1;
+    const maxSpeed =
+      (state.isBoosting ? PLAYER_TUNING.boostSpeed : PLAYER_TUNING.maxSpeed) * slowFactor;
+    if (throttle > 0) {
+      const accel =
+        PLAYER_TUNING.acceleration * (state.isBoosting ? 1.45 : 1) * (1 - state.speed / (maxSpeed * 1.1));
+      state.speed += accel * throttle * delta;
+    } else if (brake > 0) {
+      state.speed -= PLAYER_TUNING.brakePower * brake * delta;
+      if (state.speed < 0) state.speed = Math.max(state.speed, -10);
+    } else {
+      state.speed -= 4.2 * delta;
+      if (state.speed < 0) state.speed = 0;
+    }
+
+    this.forward.set(Math.sin(state.heading), 0, Math.cos(state.heading));
+    this.right.set(this.forward.z, 0, -this.forward.x);
+
+    const velocity = state.velocity.copy(this.forward).multiplyScalar(state.speed);
+    if (state.isDrifting) {
+      // Drift slide follows the same visual-left convention as steering.
+      state.lateralSpeed = THREE.MathUtils.damp(state.lateralSpeed, -steer * state.speed * 0.28, 5, delta);
+      velocity.addScaledVector(this.right, state.lateralSpeed);
+      state.speed = Math.max(0, state.speed - PLAYER_TUNING.driftFriction * delta);
+    } else {
+      state.lateralSpeed = THREE.MathUtils.damp(state.lateralSpeed, 0, PLAYER_TUNING.grip, delta);
+      velocity.addScaledVector(this.right, state.lateralSpeed);
+    }
+
+    if (state.offTrack) {
+      state.speed = Math.max(0, state.speed - PLAYER_TUNING.offTrackDrag * delta);
+      velocity.multiplyScalar(0.92);
+    }
+
+    state.speed = Math.min(state.speed, maxSpeed * 1.02);
+    state.position.addScaledVector(velocity, delta);
+    state.position.y = 0;
+
+    const boostPad = this.resolveTrack(delta, track, previousProgress);
+    if (boostPad) {
+      state.boostTimer = Math.max(state.boostTimer, PLAYER_TUNING.boostPadDuration);
+      state.isBoosting = true;
+      state.speed = Math.max(state.speed, PLAYER_TUNING.boostSpeed * 0.82);
+      this.boostFlashHandler?.();
+    }
+
+    this.kart.syncTransform(delta);
+    return { nitroUsed, boostPad, firedItem, driftBoost };
+  }
+
+  private applyVelocityFromHeading(delta: number): void {
+    const state = this.kart.state;
+    this.forward.set(Math.sin(state.heading), 0, Math.cos(state.heading));
+    state.velocity.copy(this.forward).multiplyScalar(state.speed);
+    state.position.addScaledVector(state.velocity, delta);
+  }
+
+  private resolveTrack(delta: number, track: Track, previousProgress: number): boolean {
+    void delta;
+    const state = this.kart.state;
+    state.progress = track.projectProgress(state.position, previousProgress);
+    const { lateral, sample } = track.lateralOffset(state.position, state.progress);
+    state.offTrack = Math.abs(lateral) > track.halfWidth * 0.96;
+
+    // Soft walls
+    const wallLimit = track.halfWidth + 0.85;
+    if (Math.abs(lateral) > wallLimit) {
+      const excess = Math.abs(lateral) - wallLimit;
+      const sign = Math.sign(lateral);
+      state.position.addScaledVector(sample.left, -sign * excess);
+      state.lateralSpeed *= -PLAYER_TUNING.wallBounce;
+      state.speed *= 0.86;
+      const tangentHeading = Math.atan2(sample.tangent.x, sample.tangent.z);
+      state.heading = THREE.MathUtils.damp(state.heading, tangentHeading, 3.5, 0.05);
+    }
+
+    return track.collectBoostPad(state.position, 1.4);
+  }
+}

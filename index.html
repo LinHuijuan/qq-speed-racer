@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0e1a" />
+    <link rel="icon" href="data:," />
+    <title>极速漂移 · Neon Rush</title>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="game-canvas" aria-label="3D赛车游戏画布"></canvas>
+      <div id="speed-lines" aria-hidden="true"></div>
+      <div id="vignette" aria-hidden="true"></div>
+
+      <section id="hud" aria-live="polite">
+        <div class="hud-top">
+          <div class="hud-chip">
+            <span class="label" id="rank-label">排名</span>
+            <strong id="rank-value">1</strong>
+            <span class="sub">/4</span>
+          </div>
+          <div class="hud-chip track-chip">
+            <span class="label">赛道</span>
+            <strong id="track-name">霓虹环城</strong>
+          </div>
+          <div class="hud-chip">
+            <span class="label">圈数</span>
+            <strong id="lap-value">1</strong>
+            <span class="sub">/3</span>
+          </div>
+          <div class="hud-chip">
+            <span class="label">时间</span>
+            <strong id="timer-value">00:00.00</strong>
+          </div>
+          <div class="hud-chip best">
+            <span class="label">最佳</span>
+            <strong id="best-value">--:--.--</strong>
+          </div>
+          <div class="hud-chip minimap-chip">
+            <span class="label">地图</span>
+            <canvas id="minimap" width="120" height="120" aria-label="赛道小地图"></canvas>
+          </div>
+        </div>
+
+        <div id="status-line">准备起跑</div>
+        <div id="center-banner" aria-live="polite"></div>
+        <div id="combo-stack" aria-live="polite"></div>
+
+        <div class="hud-bottom">
+          <div class="speed-cluster">
+            <div class="speed-ring">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle class="track-bg" cx="60" cy="60" r="52" />
+                <circle id="speed-arc" class="track-arc" cx="60" cy="60" r="52" />
+              </svg>
+              <div class="speed-readout">
+                <strong id="speed-value">0</strong>
+                <span>km/h</span>
+              </div>
+            </div>
+            <div class="gear-tag" id="gear-value">N</div>
+          </div>
+
+          <div class="hud-bottom-right">
+            <div class="nitro-cluster">
+              <div class="nitro-label">
+                <span>NITRO</span>
+                <strong id="nitro-percent">0%</strong>
+              </div>
+              <div class="nitro-bar">
+                <div id="nitro-fill" class="nitro-fill"></div>
+                <div id="nitro-flash" class="nitro-flash"></div>
+              </div>
+              <div class="drift-meter">
+                <div class="drift-label">漂移喷</div>
+                <div class="drift-pips">
+                  <span id="drift-pip-1"></span>
+                  <span id="drift-pip-2"></span>
+                  <span id="drift-pip-3"></span>
+                </div>
+              </div>
+              <div class="drift-hint" id="drift-hint">按住 Shift / Z 漂移蓄能</div>
+            </div>
+
+            <div class="item-cluster">
+              <div class="item-slot" id="item-slot">
+                <span id="item-icon">?</span>
+              </div>
+              <div class="item-label">按 <kbd>E</kbd> 使用</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="duo-panel" class="duo-panel" style="display:none">
+          <div class="duo-side p2-side">
+            <div class="duo-tag">P2</div>
+            <div class="duo-row">
+              <strong id="p2-speed">0</strong>
+              <span>km/h</span>
+              <div class="gear-tag p2-gear" id="p2-gear">N</div>
+            </div>
+            <div class="nitro-bar">
+              <div id="p2-nitro-fill" class="nitro-fill p2-fill"></div>
+            </div>
+            <div class="nitro-label">
+              <span>NITRO</span>
+              <strong id="p2-nitro-percent">0%</strong>
+            </div>
+            <div class="drift-meter">
+              <div class="drift-label">漂移喷</div>
+              <div class="drift-pips">
+                <span id="p2-drift-pip-1"></span>
+                <span id="p2-drift-pip-2"></span>
+                <span id="p2-drift-pip-3"></span>
+              </div>
+            </div>
+            <div class="item-cluster">
+              <div class="item-slot p2-item" id="p2-item-slot">
+                <span id="p2-item-icon">—</span>
+              </div>
+              <div class="item-label">/ 使用</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="offtrack-help">冲出赛道了！按 <kbd>R</kbd> 一键回到赛道</div>
+      </section>
+
+      <div id="overlay-start" class="overlay visible">
+        <div class="panel">
+          <p class="eyebrow">NEON CIRCUIT</p>
+          <h1>极速漂移</h1>
+          <p class="lead">漂移蓄能 · 氮气爆发 · 三圈夺冠</p>
+          <div class="mode-select">
+            <button type="button" id="mode-solo" class="mode-btn active">单人</button>
+            <button type="button" id="mode-duo" class="mode-btn">双人同屏</button>
+          </div>
+          <div id="track-picker" class="track-picker" aria-label="选择赛道"></div>
+          <ul class="controls-list">
+            <li><strong>P1</strong> WASD 转向油门 · Shift 漂移 · 空格 氮气 · E 道具 · <kbd>R</kbd> 回赛道</li>
+            <li class="duo-only"><strong>P2</strong> 方向键 · 右Shift 漂移 · 小键盘0 氮气 · / 道具 · \ 回赛道</li>
+          </ul>
+          <button id="start-button" type="button">开始比赛</button>
+          <p class="hint">双人模式为左右分屏 · 手机端可虚拟摇杆</p>
+        </div>
+      </div>
+
+      <div id="countdown" class="countdown" aria-hidden="true"></div>
+
+      <div id="overlay-finish" class="overlay">
+        <div class="panel">
+          <p class="eyebrow" id="finish-eyebrow">RACE COMPLETE</p>
+          <h2 id="finish-title">完成比赛</h2>
+          <p class="lead" id="finish-summary">—</p>
+          <div class="finish-stats">
+            <div>
+              <span>总时间</span>
+              <strong id="finish-time">00:00.00</strong>
+            </div>
+            <div>
+              <span>名次</span>
+              <strong id="finish-rank">1 / 4</strong>
+            </div>
+            <div>
+              <span>最佳单圈</span>
+              <strong id="finish-lap">--:--.--</strong>
+            </div>
+          </div>
+          <p class="lead" id="finish-record" style="display:none;color:var(--gold);margin-top:8px">新纪录！</p>
+          <button id="restart-button" type="button">再来一局</button>
+          <button id="finish-menu-button" type="button" class="secondary-btn">返回主菜单</button>
+        </div>
+      </div>
+
+      <div id="overlay-pause" class="overlay">
+        <div class="panel">
+          <p class="eyebrow">PAUSED</p>
+          <h2>已暂停</h2>
+          <div class="settings-block">
+            <label class="setting-row">
+              <span>音效</span>
+              <button type="button" id="mute-toggle" class="toggle-btn">开</button>
+            </label>
+            <label class="setting-row">
+              <span>AI 难度</span>
+              <div class="diff-group">
+                <button type="button" class="diff-btn" data-diff="easy">简单</button>
+                <button type="button" class="diff-btn active" data-diff="normal">普通</button>
+                <button type="button" class="diff-btn" data-diff="hard">困难</button>
+              </div>
+            </label>
+          </div>
+          <button id="resume-button" type="button">继续比赛</button>
+          <button id="pause-restart-button" type="button" class="secondary-btn">重新开始</button>
+          <button id="pause-menu-button" type="button" class="secondary-btn">返回主菜单</button>
+          <p class="hint">按 <kbd>Esc</kbd> 暂停/继续</p>
+        </div>
+      </div>
+
+      <button id="pause-fab" type="button" title="暂停 (Esc)" aria-label="暂停">Ⅱ</button>
+
+      <div id="touch-controls" aria-hidden="true">
+        <div id="touch-stick">
+          <div id="touch-knob"></div>
+        </div>
+        <div class="touch-actions">
+          <button id="drift-button" type="button">漂移</button>
+          <button id="nitro-button" type="button">氮气</button>
+          <button id="item-button" type="button">道具</button>
+          <button id="reset-button" type="button">回道</button>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

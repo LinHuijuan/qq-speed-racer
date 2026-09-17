@@ -1,0 +1,113 @@
+/** Lightweight procedural engine / boost audio using Web Audio API. */
+export class AudioSystem {
+  private ctx: AudioContext | null = null;
+  private master: GainNode | null = null;
+  private engineOsc: OscillatorNode | null = null;
+  private engineGain: GainNode | null = null;
+  private engineFilter: BiquadFilterNode | null = null;
+  private started = false;
+  private muted = false;
+
+  async unlock(): Promise<void> {
+    if (!this.ctx) {
+      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Ctx) return;
+      this.ctx = new Ctx();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.18;
+      this.master.connect(this.ctx.destination);
+    }
+    if (this.ctx.state === 'suspended') {
+      await this.ctx.resume();
+    }
+  }
+
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    if (this.master && this.ctx) {
+      this.master.gain.setTargetAtTime(muted ? 0 : 0.18, this.ctx.currentTime, 0.05);
+    }
+  }
+
+  startEngine(): void {
+    if (!this.ctx || !this.master || this.started) return;
+    this.engineOsc = this.ctx.createOscillator();
+    this.engineOsc.type = 'sawtooth';
+    this.engineOsc.frequency.value = 40;
+
+    this.engineFilter = this.ctx.createBiquadFilter();
+    this.engineFilter.type = 'lowpass';
+    this.engineFilter.frequency.value = 400;
+
+    this.engineGain = this.ctx.createGain();
+    this.engineGain.gain.value = 0.0;
+
+    this.engineOsc.connect(this.engineFilter);
+    this.engineFilter.connect(this.engineGain);
+    this.engineGain.connect(this.master);
+    this.engineOsc.start();
+    this.started = true;
+  }
+
+  updateEngine(speedRatio: number, boosting: boolean): void {
+    if (!this.ctx || !this.engineOsc || !this.engineGain || !this.engineFilter) return;
+    const now = this.ctx.currentTime;
+    const freq = 45 + speedRatio * 90 + (boosting ? 35 : 0);
+    this.engineOsc.frequency.setTargetAtTime(freq, now, 0.08);
+    this.engineFilter.frequency.setTargetAtTime(320 + speedRatio * 900 + (boosting ? 500 : 0), now, 0.1);
+    this.engineGain.gain.setTargetAtTime(0.05 + speedRatio * 0.12 + (boosting ? 0.08 : 0), now, 0.1);
+  }
+
+  whoosh(): void {
+    if (!this.ctx || !this.master || this.muted) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(280, now);
+    filter.frequency.exponentialRampToValueAtTime(1800, now + 0.35);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(720, now + 0.4);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.35, now + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+    osc.start(now);
+    osc.stop(now + 0.5);
+  }
+
+  countdownBeep(high = false): void {
+    if (!this.ctx || !this.master || this.muted) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = high ? 880 : 440;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.2, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + (high ? 0.35 : 0.18));
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(now);
+    osc.stop(now + 0.4);
+  }
+
+  dispose(): void {
+    try {
+      this.engineOsc?.stop();
+    } catch {
+      // already stopped
+    }
+    this.engineOsc?.disconnect();
+    this.engineGain?.disconnect();
+    this.engineFilter?.disconnect();
+    this.master?.disconnect();
+    void this.ctx?.close();
+    this.ctx = null;
+    this.started = false;
+  }
+}
