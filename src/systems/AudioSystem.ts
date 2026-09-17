@@ -52,10 +52,11 @@ export class AudioSystem {
   updateEngine(speedRatio: number, boosting: boolean): void {
     if (!this.ctx || !this.engineOsc || !this.engineGain || !this.engineFilter) return;
     const now = this.ctx.currentTime;
-    const freq = 45 + speedRatio * 90 + (boosting ? 35 : 0);
-    this.engineOsc.frequency.setTargetAtTime(freq, now, 0.08);
-    this.engineFilter.frequency.setTargetAtTime(320 + speedRatio * 900 + (boosting ? 500 : 0), now, 0.1);
-    this.engineGain.gain.setTargetAtTime(0.05 + speedRatio * 0.12 + (boosting ? 0.08 : 0), now, 0.1);
+    // More dramatic pitch climb at high speed / boost
+    const freq = 42 + speedRatio * 120 + (boosting ? 55 : 0) + Math.sin(now * 18) * 4 * speedRatio;
+    this.engineOsc.frequency.setTargetAtTime(freq, now, 0.05);
+    this.engineFilter.frequency.setTargetAtTime(280 + speedRatio * 1400 + (boosting ? 700 : 0), now, 0.08);
+    this.engineGain.gain.setTargetAtTime(0.04 + speedRatio * 0.16 + (boosting ? 0.1 : 0), now, 0.08);
   }
 
   whoosh(): void {

@@ -29,6 +29,7 @@ export type RaceHudState = {
   gear2?: string;
   driftChargeLevel: number;
   driftChargeLevel2?: number;
+  driftScore?: number;
   item: string | null;
   item2?: string | null;
   itemLabel: string;
@@ -64,6 +65,7 @@ export class Hud {
     this.el('#drift-pip-2'),
     this.el('#drift-pip-3'),
   ];
+  private readonly driftScore = this.el('#drift-score');
   private readonly duoPanel = this.el('#duo-panel');
   private readonly p2Speed = this.el('#p2-speed');
   private readonly p2Gear = this.el('#p2-gear');
@@ -213,6 +215,9 @@ export class Hud {
 
     for (let i = 0; i < 3; i += 1) {
       this.driftPips[i]?.classList.toggle('on', state.driftChargeLevel > i);
+    }
+    if (state.driftScore != null) {
+      this.driftScore.textContent = `漂移分 ${state.driftScore}`;
     }
 
     if (state.item) {

@@ -53,6 +53,8 @@ export class PlayerRacer {
   private stunTimer = 0;
   private slowTimer = 0;
   private item: ItemType | null = null;
+  private scrapeThisFrame = false;
+  private driftScore = 0;
 
   constructor(config?: { color: string; accent: string; name: string }) {
     this.kart = new Kart({
@@ -125,6 +127,14 @@ export class PlayerRacer {
     return this.driftCharge;
   }
 
+  getDriftScore(): number {
+    return Math.floor(this.driftScore);
+  }
+
+  resetDriftScore(): void {
+    this.driftScore = 0;
+  }
+
   /** Snap kart back onto the racing surface at the nearest track point. */
   resetToTrack(track: Track): void {
     const state = this.kart.state;
@@ -169,7 +179,7 @@ export class PlayerRacer {
     canControl: boolean,
     previousProgress: number,
     useItem: boolean,
-  ): { nitroUsed: boolean; boostPad: boolean; firedItem: ItemType | null; driftBoost: DriftBoostLevel } {
+  ): { nitroUsed: boolean; boostPad: boolean; firedItem: ItemType | null; driftBoost: DriftBoostLevel; wallScrape: boolean; slipstream: boolean } {
     const state = this.kart.state;
     this.shieldTimer = Math.max(0, this.shieldTimer - delta);
     this.stunTimer = Math.max(0, this.stunTimer - delta);
@@ -194,7 +204,7 @@ export class PlayerRacer {
       this.applyVelocityFromHeading(delta);
       this.resolveTrack(delta, track, previousProgress);
       this.kart.syncTransform(delta);
-      return { nitroUsed: false, boostPad: false, firedItem, driftBoost: 0 };
+      return { nitroUsed: false, boostPad: false, firedItem, driftBoost: 0, wallScrape: false, slipstream: false };
     }
 
     const stunned = this.stunTimer > 0;
@@ -278,6 +288,7 @@ export class PlayerRacer {
       state.lateralSpeed = THREE.MathUtils.damp(state.lateralSpeed, -steer * state.speed * 0.28, 5, delta);
       velocity.addScaledVector(this.right, state.lateralSpeed);
       state.speed = Math.max(0, state.speed - PLAYER_TUNING.driftFriction * delta);
+      this.driftScore += Math.abs(state.driftAngle) * state.speed * delta * 2.5;
     } else {
       state.lateralSpeed = THREE.MathUtils.damp(state.lateralSpeed, 0, PLAYER_TUNING.grip, delta);
       velocity.addScaledVector(this.right, state.lateralSpeed);
@@ -293,6 +304,8 @@ export class PlayerRacer {
     state.position.y = 0;
 
     const boostPad = this.resolveTrack(delta, track, previousProgress);
+    const wallScrape = this.scrapeThisFrame;
+    this.scrapeThisFrame = false;
     if (boostPad) {
       state.boostTimer = Math.max(state.boostTimer, PLAYER_TUNING.boostPadDuration);
       state.isBoosting = true;
@@ -301,7 +314,15 @@ export class PlayerRacer {
     }
 
     this.kart.syncTransform(delta);
-    return { nitroUsed, boostPad, firedItem, driftBoost };
+    return { nitroUsed, boostPad, firedItem, driftBoost, wallScrape, slipstream: false };
+  }
+
+  /** Called by Game when drafting behind another kart. */
+  applySlipstream(delta: number): void {
+    const state = this.kart.state;
+    if (state.speed < 8) return;
+    state.speed += 14 * delta;
+    state.speed = Math.min(state.speed, PLAYER_TUNING.boostSpeed * 0.95);
   }
 
   private applyVelocityFromHeading(delta: number): void {
@@ -318,14 +339,19 @@ export class PlayerRacer {
     const { lateral, sample } = track.lateralOffset(state.position, state.progress);
     state.offTrack = Math.abs(lateral) > track.halfWidth * 0.96;
 
-    // Soft walls
+    // Soft walls + scrape detection
     const wallLimit = track.halfWidth + 0.85;
+    const scrapeZone = track.halfWidth + 0.35;
+    if (Math.abs(lateral) > scrapeZone && Math.abs(lateral) <= wallLimit) {
+      this.scrapeThisFrame = true;
+    }
     if (Math.abs(lateral) > wallLimit) {
       const excess = Math.abs(lateral) - wallLimit;
       const sign = Math.sign(lateral);
       state.position.addScaledVector(sample.left, -sign * excess);
       state.lateralSpeed *= -PLAYER_TUNING.wallBounce;
       state.speed *= 0.86;
+      this.scrapeThisFrame = true;
       const tangentHeading = Math.atan2(sample.tangent.x, sample.tangent.z);
       state.heading = THREE.MathUtils.damp(state.heading, tangentHeading, 3.5, 0.05);
     }

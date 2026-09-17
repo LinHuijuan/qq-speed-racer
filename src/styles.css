@@ -563,6 +563,15 @@ kbd {
   animation: nitro-sweep 0.55s ease-out;
 }
 
+.drift-score {
+  margin-top: 6px;
+  color: var(--gold);
+  font-weight: 800;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 10px rgba(255, 209, 102, 0.45);
+}
+
 .drift-hint {
   margin-top: 8px;
   color: var(--muted);

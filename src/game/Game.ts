@@ -542,8 +542,43 @@ export class Game {
       if (which === 1) this.hud.flashNitro();
       this.flashScreen(result.driftBoost > 0 ? 'drift' : 'boost');
     }
+    if (result.wallScrape) {
+      const pos = player.kart.state.position.clone();
+      pos.y = 0.2;
+      this.vfx.emitSparks(pos, 6, '#ffd166');
+      cam.addTrauma(0.06);
+    }
     if (result.driftBoost > 0) {
       this.registerCombo('drift');
+    }
+
+    // Slipstream: draft behind another kart for a speed kick
+    if (canControl && player.kart.state.speed > 16 && !player.kart.state.isBoosting) {
+      const forward = new THREE.Vector3(
+        Math.sin(player.kart.state.heading),
+        0,
+        Math.cos(player.kart.state.heading),
+      );
+      const others = this.mode === 'duo'
+        ? [this.player1, this.player2, ...this.ais.map((a) => ({ kart: a.kart }))]
+        : [this.player1, ...this.ais.map((a) => ({ kart: a.kart }))];
+      for (const other of others) {
+        if (other.kart === player.kart) continue;
+        if (!other.kart.group.visible) continue;
+        const to = other.kart.state.position.clone().sub(player.kart.state.position);
+        const dist = to.length();
+        if (dist > 3 && dist < 12) {
+          to.normalize();
+          const dot = to.dot(forward);
+          if (dot > 0.88) {
+            player.applySlipstream(delta);
+            if (which === 1 && this.comboTimer <= 0) {
+              this.hud.showCombo('尾流', 1);
+            }
+            break;
+          }
+        }
+      }
     }
     if (result.firedItem) {
       this.registerCombo(result.firedItem);
@@ -846,6 +881,8 @@ export class Game {
     this.lastRank1 = 1;
     this.comboCount = 0;
     this.comboTimer = 0;
+    this.player1.resetDriftScore();
+    this.player2.resetDriftScore();
     this.items.build(this.track);
 
     this.player1.reset(this.track);
@@ -1099,6 +1136,7 @@ export class Game {
       gear2: gearOf(p2.speed, p2.isBoosting),
       driftChargeLevel: this.player1.getDriftChargeLevel(),
       driftChargeLevel2: this.player2.getDriftChargeLevel(),
+      driftScore: this.player1.getDriftScore(),
       item: this.player1.getItem(),
       item2: this.player2.getItem(),
       itemLabel: itemLabel(this.player1.getItem()),
