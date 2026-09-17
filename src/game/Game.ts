@@ -25,6 +25,7 @@ import {
   saveSettings,
   type GameSettings,
 } from '../systems/settings';
+import { clearRaceSave, loadRace, saveRace, type KartSave, type RaceSave } from '../systems/save';
 import { Track } from './Track';
 import { TRACK_LAYOUTS, type TrackLayoutId } from './TrackLayouts';
 import { createSeededRandom } from '../utils/random';
@@ -124,6 +125,7 @@ export class Game {
   private reducedMotion = false;
   private elapsed = 0;
   private readonly startButton = this.getElement('#start-button');
+  private readonly continueButton = this.getElement('#continue-button');
   private readonly restartButton = this.getElement('#restart-button');
   private readonly modeSolo = this.getElement('#mode-solo');
   private readonly modeDuo = this.getElement('#mode-duo');
@@ -190,9 +192,16 @@ export class Game {
     this.modeDuo.addEventListener('click', () => this.selectMode('duo'));
     this.installTrackPicker();
     this.startButton.addEventListener('click', () => {
+      clearRaceSave();
+      this.refreshContinueButton();
       void this.beginRace();
     });
+    this.continueButton.addEventListener('click', () => {
+      void this.continueSavedRace();
+    });
     this.restartButton.addEventListener('click', () => {
+      clearRaceSave();
+      this.refreshContinueButton();
       void this.beginRace();
     });
     this.finishMenuButton.addEventListener('click', () => this.returnToMenu());
@@ -216,8 +225,156 @@ export class Game {
     });
     window.addEventListener('keydown', this.onGlobalKey);
     this.applySettingsUi();
+    this.refreshContinueButton();
 
     this.installTestHooks();
+    this.publishDiagnostics();
+  }
+
+  private refreshContinueButton(): void {
+    const save = loadRace();
+    const show = !!save && (save.phase === 'countdown' || save.phase === 'racing');
+    this.continueButton.style.display = show ? '' : 'none';
+  }
+
+  private captureKartSave(kart: { state: {
+    position: THREE.Vector3;
+    heading: number;
+    speed: number;
+    progress: number;
+    totalProgress: number;
+    lap: number;
+    nitro: number;
+    finished: boolean;
+    finishTime: number;
+  } }, item: string | null): KartSave {
+    const s = kart.state;
+    return {
+      x: s.position.x,
+      y: s.position.y,
+      z: s.position.z,
+      heading: s.heading,
+      speed: s.speed,
+      progress: s.progress,
+      totalProgress: s.totalProgress,
+      lap: s.lap,
+      nitro: s.nitro,
+      item,
+      finished: s.finished,
+      finishTime: s.finishTime,
+    };
+  }
+
+  private applyKartSave(
+    kart: { state: {
+      position: THREE.Vector3;
+      heading: number;
+      speed: number;
+      progress: number;
+      totalProgress: number;
+      lap: number;
+      nitro: number;
+      finished: boolean;
+      finishTime: number;
+    }; syncTransform: (d: number) => void },
+    save: KartSave,
+    setItem?: (item: string | null) => void,
+  ): void {
+    const s = kart.state;
+    s.position.set(save.x, save.y, save.z);
+    s.heading = save.heading;
+    s.speed = save.speed;
+    s.progress = save.progress;
+    s.totalProgress = save.totalProgress;
+    s.lap = save.lap;
+    s.nitro = save.nitro;
+    s.finished = save.finished;
+    s.finishTime = save.finishTime;
+    setItem?.(save.item as never);
+    kart.syncTransform(0);
+  }
+
+  private persistRace(): void {
+    if (this.phase !== 'racing' && this.phase !== 'countdown') return;
+    const save: RaceSave = {
+      v: 1,
+      mode: this.mode,
+      trackId: this.trackId,
+      phase: this.phase === 'countdown' ? 'countdown' : 'racing',
+      raceTime: this.raceTime,
+      countdownTimer: this.countdownTimer,
+      currentLapStart: this.currentLapStart,
+      bestLap: this.bestLap,
+      lapTimes: [...this.lapTimes],
+      player1: this.captureKartSave(this.player1.kart, this.player1.getItem()),
+      player2:
+        this.mode === 'duo'
+          ? this.captureKartSave(this.player2.kart, this.player2.getItem())
+          : null,
+      ais: this.ais.filter((a) => a.kart.group.visible).map((a) => this.captureKartSave(a.kart, null)),
+      savedAt: Date.now(),
+    };
+    saveRace(save);
+    this.refreshContinueButton();
+  }
+
+  private async continueSavedRace(): Promise<void> {
+    const save = loadRace();
+    if (!save) return;
+    await this.audio.unlock();
+    this.audio.setMuted(this.settings.muted);
+    this.audio.startEngine();
+
+    if (save.trackId !== this.trackId) this.selectTrack(save.trackId as TrackLayoutId);
+    if (save.mode !== this.mode) this.selectMode(save.mode);
+
+    this.finishShown = false;
+    this.paused = false;
+    this.overlayPause.style.display = 'none';
+    this.overlayPause.classList.remove('visible');
+    this.hud.hideStart();
+    this.hud.hideFinish();
+    this.setRaceControlsVisible(true);
+
+    this.applyKartSave(this.player1.kart, save.player1, (i) =>
+      this.player1.setItem((i as ItemType | null) ?? null),
+    );
+    if (save.mode === 'duo' && save.player2) {
+      this.player2.kart.group.visible = true;
+      this.applyKartSave(this.player2.kart, save.player2, (i) =>
+        this.player2.setItem((i as ItemType | null) ?? null),
+      );
+    }
+
+    const visibleAis = this.ais.filter((a) => a.kart.group.visible);
+    for (let i = 0; i < visibleAis.length && i < save.ais.length; i += 1) {
+      this.applyKartSave(visibleAis[i].kart, save.ais[i]);
+    }
+
+    this.raceTime = save.raceTime;
+    this.currentLapStart = save.currentLapStart;
+    this.bestLap = save.bestLap;
+    this.lapTimes = [...save.lapTimes];
+    this.countdownTimer = save.countdownTimer;
+    this.lastCountdownLabel = '';
+    this.phase = save.phase;
+    this.prevProgressP1 = save.player1.progress;
+    this.prevProgressP2 = save.player2?.progress ?? 0;
+    this.lastRank1 = this.rankOf(this.player1);
+    this.cameraRig1.snapTo(
+      this.player1.kart.state.position,
+      this.player1.kart.state.heading,
+      this.player1.kart.state.speed,
+    );
+    if (this.mode === 'duo') {
+      this.cameraRig2.snapTo(
+        this.player2.kart.state.position,
+        this.player2.kart.state.heading,
+        this.player2.kart.state.speed,
+      );
+    }
+    this.updateHud();
+    this.render();
     this.publishDiagnostics();
   }
 
@@ -269,6 +426,7 @@ export class Game {
     this.overlayPause.classList.toggle('visible', this.paused);
     if (this.paused) {
       this.overlayPause.style.display = '';
+      this.persistRace();
     } else {
       this.overlayPause.style.display = 'none';
     }
@@ -280,6 +438,7 @@ export class Game {
     this.overlayPause.classList.remove('visible');
     this.finishShown = false;
     this.selectMode(this.mode);
+    this.refreshContinueButton();
   }
 
   private difficultyScale(): number {
@@ -719,6 +878,8 @@ export class Game {
     if (this.finishShown) return;
     this.finishShown = true;
     this.phase = 'finished';
+    clearRaceSave();
+    this.refreshContinueButton();
     if (!this.player1.kart.state.finished) {
       this.player1.kart.state.finished = true;
       this.player1.kart.state.finishTime = this.raceTime;
