@@ -44,7 +44,7 @@ const NITRO_MAX = 1;
 export type DriftBoostLevel = 0 | 1 | 2 | 3;
 
 export class PlayerRacer {
-  readonly kart: Kart;
+  kart: Kart;
   private readonly forward = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
   private boostFlashHandler: (() => void) | null = null;
@@ -56,12 +56,30 @@ export class PlayerRacer {
   private scrapeThisFrame = false;
   private driftScore = 0;
 
-  constructor(config?: { color: string; accent: string; name: string }) {
+  constructor(config?: { color: string; accent: string; name: string; livery?: string }) {
     this.kart = new Kart({
       color: config?.color ?? '#2a6cff',
       accent: config?.accent ?? '#2de2ff',
       name: config?.name ?? '你',
+      livery: config?.livery,
     });
+  }
+
+  /** Swap visual style without losing race state. */
+  applyStyle(config: { color: string; accent: string; name: string; livery?: string }): void {
+    const s = { ...this.kart.state };
+    this.kart.dispose();
+    this.kart = new Kart(config);
+    this.kart.state.position.copy(s.position);
+    this.kart.state.heading = s.heading;
+    this.kart.state.speed = s.speed;
+    this.kart.state.lap = s.lap;
+    this.kart.state.progress = s.progress;
+    this.kart.state.totalProgress = s.totalProgress;
+    this.kart.state.nitro = s.nitro;
+    this.kart.state.finished = s.finished;
+    this.kart.state.finishTime = s.finishTime;
+    this.kart.syncTransform(0);
   }
 
   reset(track: Track): void {

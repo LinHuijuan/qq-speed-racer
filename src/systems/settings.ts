@@ -1,6 +1,7 @@
 export type GameSettings = {
   muted: boolean;
   difficulty: 'easy' | 'normal' | 'hard';
+  carId: string;
 };
 
 export type TrackBests = Record<string, number>;
@@ -11,6 +12,7 @@ const BESTS_KEY = 'neon-rush-bests';
 const defaults: GameSettings = {
   muted: false,
   difficulty: 'normal',
+  carId: 'neon-blue',
 };
 
 export function loadSettings(): GameSettings {
@@ -24,6 +26,7 @@ export function loadSettings(): GameSettings {
         parsed.difficulty === 'easy' || parsed.difficulty === 'hard'
           ? parsed.difficulty
           : 'normal',
+      carId: typeof parsed.carId === 'string' && parsed.carId ? parsed.carId : defaults.carId,
     };
   } catch {
     return { ...defaults };

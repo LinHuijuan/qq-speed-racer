@@ -5,6 +5,7 @@ export type KartConfig = {
   color: THREE.ColorRepresentation;
   accent: THREE.ColorRepresentation;
   name: string;
+  livery?: string;
 };
 
 export type KartState = {
@@ -168,7 +169,7 @@ export class Kart {
 
   private createBody(): THREE.Group {
     const group = new THREE.Group();
-    const livery = loadGameTexture('/assets/kart-livery.png', { repeat: [1, 1] });
+    const livery = loadGameTexture(this.config.livery ?? '/assets/kart-livery.png', { repeat: [1, 1] });
     const paint = new THREE.MeshPhysicalMaterial({
       color: this.config.color,
       map: livery,
@@ -193,7 +194,7 @@ export class Kart {
       color: '#151a24',
       roughness: 0.4,
       metalness: 0.5,
-      map: loadGameTexture('/assets/kart-livery.png', { repeat: [0.5, 0.5] }),
+      map: loadGameTexture(this.config.livery ?? '/assets/kart-livery.png', { repeat: [0.5, 0.5] }),
     });
 
     // Low wide chassis

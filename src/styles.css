@@ -1193,6 +1193,64 @@ body.duo-mode #offtrack-help {
   color: #fff;
 }
 
+.car-picker {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.car-btn {
+  min-height: 72px;
+  padding: 8px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-sm);
+  background: rgba(8, 14, 28, 0.72);
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.1s ease;
+}
+
+.car-btn:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.car-btn:active {
+  transform: scale(0.97);
+}
+
+.car-btn .swatch {
+  display: block;
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 6px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.35);
+}
+
+.car-btn strong {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--ink);
+}
+
+.car-btn span {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.62rem;
+}
+
+.car-btn.active {
+  border-color: var(--cyan);
+  background: linear-gradient(145deg, rgba(45, 226, 255, 0.18), rgba(255, 60, 172, 0.12));
+  box-shadow: 0 0 16px rgba(45, 226, 255, 0.18);
+}
+
 .duo-only {
   display: none;
 }
@@ -1399,6 +1457,10 @@ body.duo-mode #touch-controls {
 
   .track-picker {
     grid-template-columns: 1fr;
+  }
+
+  .car-picker {
+    grid-template-columns: 1fr 1fr;
   }
 
   #pause-fab {

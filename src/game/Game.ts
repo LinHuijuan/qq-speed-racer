@@ -28,6 +28,7 @@ import {
 import { clearRaceSave, loadRace, saveRace, type KartSave, type RaceSave } from '../systems/save';
 import { Track } from './Track';
 import { TRACK_LAYOUTS, type TrackLayoutId } from './TrackLayouts';
+import { CAR_STYLES, getCarStyle } from './CarStyles';
 import { createSeededRandom } from '../utils/random';
 import { loadGameTexture } from '../assets/textures';
 
@@ -191,6 +192,8 @@ export class Game {
     this.modeSolo.addEventListener('click', () => this.selectMode('solo'));
     this.modeDuo.addEventListener('click', () => this.selectMode('duo'));
     this.installTrackPicker();
+    this.installCarPicker();
+    this.applyPlayerCar();
     this.startButton.addEventListener('click', () => {
       clearRaceSave();
       this.refreshContinueButton();
@@ -545,6 +548,55 @@ export class Game {
     resizeRenderer(this.renderer, this.cameraP1, this.tuning.maxDpr);
     this.post.resize();
     this.render();
+  }
+
+  private installCarPicker(): void {
+    const host = document.querySelector('#car-picker');
+    if (!host) return;
+    host.innerHTML = '';
+    for (const car of CAR_STYLES) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `car-btn${car.id === this.settings.carId ? ' active' : ''}`;
+      btn.dataset.carId = car.id;
+      btn.innerHTML = `<span class="swatch" style="background:linear-gradient(135deg,${car.color},${car.accent})"></span><strong>${car.name}</strong><span>${car.desc}</span>`;
+      btn.addEventListener('click', () => this.selectCar(car.id));
+      host.appendChild(btn);
+    }
+  }
+
+  private selectCar(id: string): void {
+    this.settings.carId = id;
+    saveSettings(this.settings);
+    document.querySelectorAll('.car-btn').forEach((el) => {
+      el.classList.toggle('active', (el as HTMLElement).dataset.carId === id);
+    });
+    this.applyPlayerCar();
+  }
+
+  private applyPlayerCar(): void {
+    const style = getCarStyle(this.settings.carId);
+    this.scene.remove(this.player1.kart.group);
+    this.player1.applyStyle({
+      color: style.color,
+      accent: style.accent,
+      name: 'P1',
+      livery: style.livery,
+    });
+    this.scene.add(this.player1.kart.group);
+    this.player1.setBoostFlashHandler(() => {
+      this.hud.flashNitro();
+      this.audio.whoosh();
+      this.cameraRig1.addTrauma(0.25);
+    });
+    if (this.phase === 'menu') {
+      this.player1.reset(this.track);
+      this.cameraRig1.snapTo(
+        this.player1.kart.state.position,
+        this.player1.kart.state.heading,
+        0,
+      );
+    }
   }
 
   private installTrackPicker(): void {
