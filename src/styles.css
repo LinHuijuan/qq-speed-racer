@@ -174,8 +174,8 @@ kbd {
 }
 
 .hud-chip {
-  min-width: 92px;
-  padding: 10px 12px;
+  min-width: 84px;
+  padding: 8px 11px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   background: linear-gradient(160deg, rgba(16, 22, 42, 0.82), rgba(8, 12, 28, 0.72));
@@ -189,7 +189,7 @@ kbd {
 }
 
 .track-chip strong {
-  font-size: 0.92rem !important;
+  font-size: 0.88rem !important;
   letter-spacing: 0.04em;
   background: linear-gradient(90deg, var(--cyan), #fff);
   -webkit-background-clip: text;
@@ -198,15 +198,15 @@ kbd {
 }
 
 .minimap-chip {
-  min-width: 132px;
-  padding: 8px;
+  min-width: 120px;
+  padding: 6px;
 }
 
 .minimap-chip #minimap {
   display: block;
-  width: 120px;
-  height: 120px;
-  margin-top: 4px;
+  width: 108px;
+  height: 108px;
+  margin-top: 2px;
   border: 1px solid rgba(45, 226, 255, 0.22);
   border-radius: 8px;
   background: rgba(4, 8, 18, 0.55);
@@ -215,19 +215,19 @@ kbd {
 .hud-chip .label {
   display: block;
   color: var(--muted);
-  font-size: 0.64rem;
+  font-size: 0.6rem;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .hud-chip strong {
   display: inline-block;
-  margin-top: 3px;
-  font-size: 1.3rem;
+  margin-top: 1px;
+  font-size: 1.15rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  line-height: 1;
+  line-height: 1.1;
 }
 
 .hud-chip .sub {

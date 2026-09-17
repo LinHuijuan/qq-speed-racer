@@ -219,11 +219,11 @@ export class Track {
     });
     const roughnessMap = this.createRoadRoughnessTexture();
     const material = new THREE.MeshStandardMaterial({
-      color: '#c0c8d8',
+      color: '#d0d8e8',
       map: roadTexture,
       roughnessMap,
-      roughness: 0.58,
-      metalness: 0.18,
+      roughness: 0.55,
+      metalness: 0.2,
       side: THREE.DoubleSide,
     });
 
@@ -478,6 +478,9 @@ export class Track {
 
     for (let i = 0; i < sideCount; i += 1) {
       const sampleIndex = Math.floor((i / sideCount) * SAMPLE_COUNT);
+      // Skip the start/finish wrap zone — rails there look chaotic
+      const t = sampleIndex / SAMPLE_COUNT;
+      if (t < 0.02 || t > 0.97) continue;
       const sample = this.samples[sampleIndex];
       const next = this.samples[(sampleIndex + 6) % SAMPLE_COUNT];
       for (const sign of [-1, 1] as const) {
