@@ -128,6 +128,14 @@ export class Game {
   private readonly modeSolo = this.getElement('#mode-solo');
   private readonly modeDuo = this.getElement('#mode-duo');
   private readonly pauseFab = this.getElement('#pause-fab');
+  private readonly pipToggle = this.getElement('#pip-toggle');
+  private readonly pipFrame = this.getElement('#pip-frame');
+  private readonly pipLabel = this.getElement('#pip-label');
+  private readonly pipWrap = this.getElement('#pip-canvas-wrap');
+  private pipEnabled = false;
+  private pipRenderer: THREE.WebGLRenderer | null = null;
+  private readonly pipCamera = new THREE.PerspectiveCamera(55, 16 / 10, 0.1, 300);
+  private pipFocus: { kart: { group: THREE.Group; state: { heading: number; speed: number; position: THREE.Vector3 } }; name: string } | null = null;
   private readonly overlayPause = this.getElement('#overlay-pause');
   private readonly resumeButton = this.getElement('#resume-button');
   private readonly pauseRestartButton = this.getElement('#pause-restart-button');
@@ -189,6 +197,7 @@ export class Game {
     });
     this.finishMenuButton.addEventListener('click', () => this.returnToMenu());
     this.pauseFab.addEventListener('click', () => this.togglePause());
+    this.pipToggle.addEventListener('click', () => this.togglePip());
     this.resumeButton.addEventListener('click', () => this.togglePause(false));
     this.pauseRestartButton.addEventListener('click', () => {
       this.togglePause(false);
@@ -240,6 +249,16 @@ export class Game {
     });
   }
 
+  private setRaceControlsVisible(visible: boolean): void {
+    this.pauseFab.classList.toggle('hidden-ctl', !visible);
+    this.pipToggle.classList.toggle('hidden-ctl', !visible);
+    if (!visible) {
+      this.pipEnabled = false;
+      this.pipFrame.classList.add('hidden');
+      this.pipToggle.classList.remove('active');
+    }
+  }
+
   private togglePause(force?: boolean): void {
     if (this.phase !== 'racing' && this.phase !== 'countdown' && force !== false) {
       // Allow pause only during an active race; ignore on menu/finish unless forcing resume
@@ -269,6 +288,66 @@ export class Game {
     return 1;
   }
 
+  private togglePip(): void {
+    this.pipEnabled = !this.pipEnabled;
+    this.pipFrame.classList.toggle('hidden', !this.pipEnabled);
+    this.pipToggle.classList.toggle('active', this.pipEnabled);
+    if (this.pipEnabled) this.ensurePipRenderer();
+  }
+
+  private ensurePipRenderer(): void {
+    if (this.pipRenderer) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 200;
+    this.pipWrap.appendChild(canvas);
+    this.pipRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    this.pipRenderer.setPixelRatio(1);
+    this.pipRenderer.setSize(320, 200, false);
+    this.pipRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.pipRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.pipRenderer.toneMappingExposure = 1.05;
+    this.pipCamera.aspect = 320 / 200;
+    this.pipCamera.updateProjectionMatrix();
+  }
+
+  private updatePip(delta: number): void {
+    if (!this.pipEnabled || this.phase === 'menu') return;
+    this.ensurePipRenderer();
+    // Focus the leading AI (or player2 in duo if no AI ahead)
+    let best: (typeof this.ais)[0] | null = null;
+    let bestProg = -1;
+    for (const ai of this.ais) {
+      if (!ai.kart.group.visible) continue;
+      if (ai.kart.state.totalProgress > bestProg) {
+        bestProg = ai.kart.state.totalProgress;
+        best = ai;
+      }
+    }
+    if (best) {
+      this.pipFocus = { kart: best.kart, name: best.kart.displayName };
+    } else if (this.mode === 'duo') {
+      this.pipFocus = { kart: this.player2.kart, name: 'P2' };
+    } else {
+      this.pipFocus = null;
+    }
+
+    if (!this.pipFocus || !this.pipRenderer) return;
+    const k = this.pipFocus.kart;
+    const state = k.state;
+    this.pipLabel.textContent = `对手 · ${this.pipFocus.name}`;
+    const fwd = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
+    const camPos = state.position.clone().addScaledVector(fwd, -7.5);
+    camPos.y += 3.2;
+    this.pipCamera.position.lerp(camPos, 1 - Math.exp(-delta * 6));
+    const look = state.position.clone().addScaledVector(fwd, 5);
+    look.y += 0.8;
+    this.pipCamera.lookAt(look);
+    this.pipCamera.fov = 52 + Math.min(state.speed * 0.2, 12);
+    this.pipCamera.updateProjectionMatrix();
+    this.pipRenderer.render(this.scene, this.pipCamera);
+  }
+
   start(): void {
     this.loop.start();
   }
@@ -284,6 +363,7 @@ export class Game {
     for (const ai of this.ais) ai.kart.dispose();
     this.track.dispose();
     this.post.dispose();
+    this.pipRenderer?.dispose();
     this.renderer.dispose();
     window.removeEventListener('keydown', this.onGlobalKey);
     window.__THREE_GAME_DIAGNOSTICS__ = undefined;
@@ -301,6 +381,7 @@ export class Game {
     this.hud.showStart();
     this.hud.hideFinish();
     this.hud.setTrackBest(getBest(this.trackId));
+    this.setRaceControlsVisible(false);
     // Re-sync canvas size and post targets after mode switch.
     resizeRenderer(this.renderer, this.cameraP1, this.tuning.maxDpr);
     this.post.resize();
@@ -359,6 +440,7 @@ export class Game {
     this.hud.hideStart();
     this.hud.hideFinish();
     this.hud.setTrackBest(getBest(this.trackId));
+    this.setRaceControlsVisible(true);
     this.phase = 'countdown';
     this.countdownTimer = COUNTDOWN_SECONDS;
     this.lastCountdownLabel = '';
@@ -490,6 +572,7 @@ export class Game {
     }
 
     this.updateHud();
+    this.updatePip(delta);
     this.publishDiagnostics();
   }
 
