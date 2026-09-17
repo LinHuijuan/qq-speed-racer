@@ -252,6 +252,20 @@ kbd {
   font-size: 0.85rem;
   text-align: center;
   letter-spacing: 0.04em;
+  max-width: 42vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 900px) {
+  #status-line {
+    top: max(18px, env(safe-area-inset-top));
+    left: auto;
+    right: max(72px, calc(env(safe-area-inset-right) + 72px));
+    transform: none;
+    border-radius: var(--radius-sm);
+  }
 }
 
 #status-line.pulse {
@@ -573,15 +587,21 @@ kbd {
   height: 72px;
   display: grid;
   place-items: center;
-  border: 2px solid rgba(155, 107, 255, 0.55);
-  background: rgba(20, 12, 40, 0.75);
-  box-shadow: 0 0 24px rgba(155, 107, 255, 0.25);
+  border: 2px dashed rgba(155, 107, 255, 0.35);
+  border-radius: 16px;
+  background: rgba(20, 12, 40, 0.55);
   font-size: 1.6rem;
   font-weight: 900;
+  color: rgba(238, 244, 255, 0.35);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .item-slot.has-item {
-  border-color: var(--cyan);
+  border: 2px solid var(--cyan);
+  border-style: solid;
+  color: var(--ink);
   box-shadow: 0 0 28px rgba(45, 226, 255, 0.4);
   animation: item-pulse 1.4s ease-in-out infinite;
 }

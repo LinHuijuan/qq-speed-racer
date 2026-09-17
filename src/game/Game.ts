@@ -789,10 +789,10 @@ export class Game {
     this.scene.background = new THREE.Color('#0a1020');
     this.scene.fog = new THREE.FogExp2('#0c1428', 0.0028);
 
-    const hemisphere = new THREE.HemisphereLight('#d8e8ff', '#2a2840', 2.15);
+    const hemisphere = new THREE.HemisphereLight('#e0eeff', '#2a2840', 2.35);
     this.scene.add(hemisphere);
 
-    const key = new THREE.DirectionalLight('#fff0dc', 2.55);
+    const key = new THREE.DirectionalLight('#fff2e0', 2.75);
     key.position.set(50, 80, 30);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);

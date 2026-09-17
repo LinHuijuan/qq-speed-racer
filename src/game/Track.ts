@@ -219,11 +219,11 @@ export class Track {
     });
     const roughnessMap = this.createRoadRoughnessTexture();
     const material = new THREE.MeshStandardMaterial({
-      color: '#a8b0c4',
+      color: '#c0c8d8',
       map: roadTexture,
       roughnessMap,
-      roughness: 0.62,
-      metalness: 0.16,
+      roughness: 0.58,
+      metalness: 0.18,
       side: THREE.DoubleSide,
     });
 
