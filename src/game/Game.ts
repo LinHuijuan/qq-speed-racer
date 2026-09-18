@@ -12,6 +12,7 @@ import {
   type PostPipeline,
 } from '../core/Renderer';
 import { AIRacer } from '../entities/AIRacer';
+import type { Kart } from '../entities/Kart';
 import { PlayerRacer } from '../entities/PlayerRacer';
 import { AudioSystem } from '../systems/AudioSystem';
 import { CameraRig } from '../systems/CameraRig';
@@ -34,6 +35,8 @@ import { loadGameTexture } from '../assets/textures';
 
 const TOTAL_LAPS = 3;
 const COUNTDOWN_SECONDS = 3.4;
+/** Picture-in-picture refresh interval — it costs a second scene render. */
+const PIP_INTERVAL = 1 / 20;
 
 type RacePhase = 'menu' | 'countdown' | 'racing' | 'finished';
 
@@ -84,8 +87,9 @@ export class Game {
   private readonly items = new ItemSystem(42);
   private readonly cameraRig1 = new CameraRig(this.cameraP1);
   private readonly cameraRig2 = new CameraRig(this.cameraP2);
-  private readonly lightP1 = new THREE.PointLight('#b8e4ff', 3.2, 36);
   private readonly lightP2 = new THREE.PointLight('#ffd166', 2.4, 28);
+  private keyLight: THREE.DirectionalLight | null = null;
+  private readonly shadowFocus = new THREE.Vector3();
   private post: PostPipeline;
   private readonly speedLines = document.querySelector<HTMLElement>('#speed-lines');
   private offtrackHelp: HTMLElement | null = null;
@@ -94,6 +98,18 @@ export class Game {
     (delta, elapsed) => this.update(delta, elapsed),
     () => this.render(),
   );
+  private readonly resizeObserver =
+    typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => this.syncViewport())
+      : null;
+  private readonly onWindowResize = () => this.syncViewport();
+  /** Reusable scratch vectors — the per-frame paths must not allocate. */
+  private readonly scratchForward = new THREE.Vector3();
+  private readonly scratchTo = new THREE.Vector3();
+  private readonly scratchOrigin = new THREE.Vector3();
+  private readonly scratchSide = new THREE.Vector3();
+  private readonly scratchRear = new THREE.Vector3();
+  private readonly kartRefs: Array<{ kart: Kart }> = [];
 
   private readonly inputP1 = emptyInput();
   private readonly inputP2 = emptyInput();
@@ -136,6 +152,7 @@ export class Game {
   private readonly pipLabel = this.getElement('#pip-label');
   private readonly pipWrap = this.getElement('#pip-canvas-wrap');
   private pipEnabled = false;
+  private pipAccum = 0;
   private pipRenderer: THREE.WebGLRenderer | null = null;
   private readonly pipCamera = new THREE.PerspectiveCamera(55, 16 / 10, 0.1, 300);
   private pipFocus: { kart: { group: THREE.Group; state: { heading: number; speed: number; position: THREE.Vector3 } }; name: string } | null = null;
@@ -168,6 +185,7 @@ export class Game {
     this.ais.push(new AIRacer(0));
     this.ais.push(new AIRacer(1));
     this.ais.push(new AIRacer(2));
+    this.rebuildKartRefs();
 
     this.player1.setBoostFlashHandler(() => {
       this.hud.flashNitro();
@@ -186,8 +204,11 @@ export class Game {
     this.resetRace(true);
     this.hud.showStart();
     this.hud.setMode('solo');
-    resizeRenderer(this.renderer, this.cameraP1, this.tuning.maxDpr);
-    this.post.resize();
+    this.syncRenderMode();
+    this.syncViewport();
+    // Viewport work is event driven — never per frame.
+    this.resizeObserver?.observe(this.canvas);
+    window.addEventListener('resize', this.onWindowResize);
 
     this.modeSolo.addEventListener('click', () => this.selectMode('solo'));
     this.modeDuo.addEventListener('click', () => this.selectMode('duo'));
@@ -476,6 +497,14 @@ export class Game {
   private updatePip(delta: number): void {
     if (!this.pipEnabled || this.phase === 'menu') return;
     this.ensurePipRenderer();
+
+    // The PiP window owns a second WebGL context, so refresh it at 20fps instead
+    // of paying for a full extra scene render on every frame.
+    this.pipAccum += delta;
+    if (this.pipAccum < PIP_INTERVAL) return;
+    const step = Math.min(this.pipAccum, 0.25);
+    this.pipAccum = 0;
+
     // Focus the leading AI (or player2 in duo if no AI ahead)
     let best: (typeof this.ais)[0] | null = null;
     let bestProg = -1;
@@ -486,27 +515,32 @@ export class Game {
         best = ai;
       }
     }
-    if (best) {
-      this.pipFocus = { kart: best.kart, name: best.kart.displayName };
-    } else if (this.mode === 'duo') {
-      this.pipFocus = { kart: this.player2.kart, name: 'P2' };
-    } else {
-      this.pipFocus = null;
-    }
 
-    if (!this.pipFocus || !this.pipRenderer) return;
-    const k = this.pipFocus.kart;
-    const state = k.state;
-    this.pipLabel.textContent = `对手 · ${this.pipFocus.name}`;
-    const fwd = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
-    const camPos = state.position.clone().addScaledVector(fwd, -7.5);
-    camPos.y += 3.2;
-    this.pipCamera.position.lerp(camPos, 1 - Math.exp(-delta * 6));
-    const look = state.position.clone().addScaledVector(fwd, 5);
-    look.y += 0.8;
-    this.pipCamera.lookAt(look);
-    this.pipCamera.fov = 52 + Math.min(state.speed * 0.2, 12);
-    this.pipCamera.updateProjectionMatrix();
+    const focusKart = best ? best.kart : this.mode === 'duo' ? this.player2.kart : null;
+    if (!focusKart) {
+      this.pipFocus = null;
+      return;
+    }
+    if (!this.pipFocus || this.pipFocus.kart !== focusKart) {
+      const name = best ? focusKart.displayName : 'P2';
+      this.pipFocus = { kart: focusKart, name };
+      this.pipLabel.textContent = `对手 · ${name}`;
+    }
+    if (!this.pipRenderer) return;
+
+    const state = focusKart.state;
+    const fwd = this.scratchForward.set(Math.sin(state.heading), 0, Math.cos(state.heading));
+    this.scratchOrigin.copy(state.position).addScaledVector(fwd, -7.5);
+    this.scratchOrigin.y += 3.2;
+    this.pipCamera.position.lerp(this.scratchOrigin, 1 - Math.exp(-step * 6));
+    this.scratchRear.copy(state.position).addScaledVector(fwd, 5);
+    this.scratchRear.y += 0.8;
+    this.pipCamera.lookAt(this.scratchRear);
+    const fov = 52 + Math.min(state.speed * 0.2, 12);
+    if (Math.abs(this.pipCamera.fov - fov) > 0.01) {
+      this.pipCamera.fov = fov;
+      this.pipCamera.updateProjectionMatrix();
+    }
     this.pipRenderer.render(this.scene, this.pipCamera);
   }
 
@@ -528,6 +562,8 @@ export class Game {
     this.pipRenderer?.dispose();
     this.renderer.dispose();
     window.removeEventListener('keydown', this.onGlobalKey);
+    window.removeEventListener('resize', this.onWindowResize);
+    this.resizeObserver?.disconnect();
     window.__THREE_GAME_DIAGNOSTICS__ = undefined;
     window.__THREE_GAME_TEST_HOOKS__ = undefined;
   }
@@ -544,9 +580,9 @@ export class Game {
     this.hud.hideFinish();
     this.hud.setTrackBest(getBest(this.trackId));
     this.setRaceControlsVisible(false);
-    // Re-sync canvas size and post targets after mode switch.
-    resizeRenderer(this.renderer, this.cameraP1, this.tuning.maxDpr);
-    this.post.resize();
+    // Re-sync cameras and canvas size after the mode switch.
+    this.syncRenderMode();
+    this.syncViewport();
     this.render();
   }
 
@@ -584,6 +620,7 @@ export class Game {
       livery: style.livery,
     });
     this.scene.add(this.player1.kart.group);
+    this.rebuildKartRefs();
     this.player1.setBoostFlashHandler(() => {
       this.hud.flashNitro();
       this.audio.whoosh();
@@ -672,15 +709,6 @@ export class Game {
       return;
     }
 
-    const aspect = Math.max(0.5, this.canvas.clientWidth / Math.max(1, this.canvas.clientHeight));
-    const viewAspect = this.mode === 'duo' ? aspect / 2 : aspect;
-    this.cameraP1.aspect = viewAspect;
-    this.cameraP2.aspect = viewAspect;
-    this.cameraP1.updateProjectionMatrix();
-    this.cameraP2.updateProjectionMatrix();
-
-    resizeRenderer(this.renderer, this.cameraP1, this.tuning.maxDpr);
-    this.post.resize();
     const animDelta = this.reducedMotion ? 0 : delta;
 
     this.track.update(animDelta, elapsed);
@@ -698,6 +726,8 @@ export class Game {
     }
 
     const raceActive = this.phase === 'racing';
+    // The race clock only runs while racing — countdown / pause / finish freeze it.
+    if (raceActive) this.raceTime += delta;
     this.items.update(animDelta, elapsed);
 
     this.updateHumanPlayer(this.player1, this.inputP1, delta, raceActive, 1);
@@ -739,7 +769,6 @@ export class Game {
 
     const p1 = this.player1.kart.state;
     this.cameraRig1.update(delta, p1.position, p1.heading, p1.speed, p1.isBoosting);
-    this.lightP1.position.set(p1.position.x, 5.5, p1.position.z);
     if (this.mode === 'duo') {
       const p2 = this.player2.kart.state;
       this.cameraRig2.update(delta, p2.position, p2.heading, p2.speed, p2.isBoosting);
@@ -837,7 +866,7 @@ export class Game {
       this.flashScreen(result.driftBoost > 0 ? 'drift' : 'boost');
     }
     if (result.wallScrape) {
-      const pos = player.kart.state.position.clone();
+      const pos = this.scratchOrigin.copy(player.kart.state.position);
       pos.y = 0.2;
       this.vfx.emitSparks(pos, 6, '#ffd166');
       cam.addTrauma(0.06);
@@ -848,18 +877,16 @@ export class Game {
 
     // Slipstream: draft behind another kart for a speed kick
     if (canControl && player.kart.state.speed > 16 && !player.kart.state.isBoosting) {
-      const forward = new THREE.Vector3(
+      const forward = this.scratchForward.set(
         Math.sin(player.kart.state.heading),
         0,
         Math.cos(player.kart.state.heading),
       );
-      const others = this.mode === 'duo'
-        ? [this.player1, this.player2, ...this.ais.map((a) => ({ kart: a.kart }))]
-        : [this.player1, ...this.ais.map((a) => ({ kart: a.kart }))];
-      for (const other of others) {
+      // kartRefs is built once; invisible slots (P2 in solo) are skipped below.
+      for (const other of this.kartRefs) {
         if (other.kart === player.kart) continue;
         if (!other.kart.group.visible) continue;
-        const to = other.kart.state.position.clone().sub(player.kart.state.position);
+        const to = this.scratchTo.copy(other.kart.state.position).sub(player.kart.state.position);
         const dist = to.length();
         if (dist > 3 && dist < 12) {
           to.normalize();
@@ -1040,30 +1067,62 @@ export class Game {
     this.audio.whoosh();
   }
 
-  private render(): void {
-    const w = this.canvas.width;
-    const h = this.canvas.height;
-    // Always start from a clean full-canvas viewport/scissor.
-    this.renderer.setScissorTest(false);
-    this.renderer.setViewport(0, 0, w, h);
+  /**
+   * Keeps the shadow frustum centred on the action. The focus snaps to a 4-unit
+   * grid so the shadow map doesn't shimmer while driving.
+   */
+  private followShadow(position: THREE.Vector3): void {
+    if (!this.keyLight) return;
+    const focusX = Math.round(position.x / 4) * 4;
+    const focusZ = Math.round(position.z / 4) * 4;
+    this.shadowFocus.set(focusX, 0, focusZ);
+    this.keyLight.position.set(focusX + 50, 80, focusZ + 30);
+    this.keyLight.target.position.copy(this.shadowFocus);
+  }
 
-    if (this.mode === 'duo') {
-      const half = Math.floor(w / 2);
-      this.renderer.setScissorTest(true);
-      this.renderer.setViewport(0, 0, half, h);
-      this.renderer.setScissor(0, 0, half, h);
-      this.renderer.render(this.scene, this.cameraP1);
-      this.renderer.setViewport(half, 0, w - half, h);
-      this.renderer.setScissor(half, 0, w - half, h);
-      this.renderer.render(this.scene, this.cameraP2);
-      this.renderer.setScissorTest(false);
-      this.renderer.setViewport(0, 0, w, h);
-    } else {
-      this.post.render();
-      // Composer may leave viewport at its internal size; restore full canvas.
-      this.renderer.setScissorTest(false);
-      this.renderer.setViewport(0, 0, this.canvas.width, this.canvas.height);
+  /** Selects the single-camera or split-screen post pass for the current mode. */
+  private syncRenderMode(): void {
+    if (this.mode === 'duo') this.post.setCameras(this.cameraP1, this.cameraP2);
+    else this.post.setCameras(this.cameraP1);
+  }
+
+  /**
+   * Applies canvas size and camera aspect changes. Driven by ResizeObserver and
+   * window resize rather than running on every frame.
+   */
+  private syncViewport(): void {
+    const resized = resizeRenderer(this.renderer, this.cameraP1, this.tuning.maxDpr);
+    const aspect = Math.max(0.5, this.canvas.clientWidth / Math.max(1, this.canvas.clientHeight));
+    const viewAspect = this.mode === 'duo' ? aspect / 2 : aspect;
+
+    let aspectChanged = false;
+    if (Math.abs(this.cameraP1.aspect - viewAspect) > 1e-4) {
+      this.cameraP1.aspect = viewAspect;
+      this.cameraP1.updateProjectionMatrix();
+      aspectChanged = true;
     }
+    if (Math.abs(this.cameraP2.aspect - viewAspect) > 1e-4) {
+      this.cameraP2.aspect = viewAspect;
+      this.cameraP2.updateProjectionMatrix();
+      aspectChanged = true;
+    }
+
+    if (resized || aspectChanged) this.post.resize();
+  }
+
+  private rebuildKartRefs(): void {
+    this.kartRefs.length = 0;
+    this.kartRefs.push({ kart: this.player1.kart }, { kart: this.player2.kart });
+    for (const ai of this.ais) this.kartRefs.push({ kart: ai.kart });
+  }
+
+  private render(): void {
+    // Single choke point for every drawn frame, so the shadow frustum is always
+    // centred on the player even after a snap/respawn without an update tick.
+    this.followShadow(this.player1.kart.state.position);
+    // Solo renders one view, duo renders a scissored pair — both through the
+    // composer so bloom and tone mapping stay identical.
+    this.post.render();
   }
 
   private createScene(): void {
@@ -1129,12 +1188,15 @@ export class Game {
     key.shadow.mapSize.set(2048, 2048);
     key.shadow.camera.near = 1;
     key.shadow.camera.far = 200;
-    key.shadow.camera.left = -80;
-    key.shadow.camera.right = 80;
-    key.shadow.camera.top = 80;
-    key.shadow.camera.bottom = -80;
+    // Tight frustum: it now tracks the player instead of covering the whole map.
+    key.shadow.camera.left = -64;
+    key.shadow.camera.right = 64;
+    key.shadow.camera.top = 64;
+    key.shadow.camera.bottom = -64;
     key.shadow.bias = -0.0004;
     this.scene.add(key);
+    this.scene.add(key.target);
+    this.keyLight = key;
 
     const fill = new THREE.DirectionalLight('#6a9ae8', 0.7);
     fill.position.set(-40, 50, 50);
@@ -1143,13 +1205,6 @@ export class Game {
     const rim = new THREE.DirectionalLight('#8a5078', 0.25);
     rim.position.set(-60, 25, -40);
     this.scene.add(rim);
-
-    this.lightP1.position.set(0, 10, 0);
-    this.lightP1.distance = 8;
-    this.lightP1.intensity = 0.15;
-    this.lightP1.color.set('#90b0d0');
-    this.lightP1.visible = false;
-    this.scene.add(this.lightP1);
 
     this.lightP2.position.set(0, 10, 0);
     this.lightP2.distance = 8;
@@ -1284,27 +1339,28 @@ export class Game {
 
   private emitPlayerVfx(player: PlayerRacer): void {
     const state = player.kart.state;
-    const origin = state.position.clone();
+    const origin = this.scratchOrigin.copy(state.position);
     origin.y = 0.15;
-    const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
+    const forward = this.scratchForward.set(Math.sin(state.heading), 0, Math.cos(state.heading));
     if (state.isDrifting && state.speed > 5) {
       this.vfx.emitDrift(origin, forward, Math.abs(state.driftAngle) + 0.3);
       // Dual-wheel spark burst for a more dramatic drift
-      const left = origin.clone().addScaledVector(new THREE.Vector3(forward.z, 0, -forward.x), 0.9);
-      const right = origin.clone().addScaledVector(new THREE.Vector3(forward.z, 0, -forward.x), -0.9);
+      const side = this.scratchSide.set(forward.z, 0, -forward.x);
+      const left = this.scratchRear.copy(origin).addScaledVector(side, 0.9);
       left.y = 0.12;
-      right.y = 0.12;
       this.vfx.emitDrift(left, forward, Math.abs(state.driftAngle));
+      const right = this.scratchTo.copy(origin).addScaledVector(side, -0.9);
+      right.y = 0.12;
       this.vfx.emitDrift(right, forward, Math.abs(state.driftAngle));
     }
     if (state.isBoosting) {
       this.vfx.emitBoost(origin, forward);
-      const rear = origin.clone().addScaledVector(forward, -1.2);
+      const rear = this.scratchRear.copy(origin).addScaledVector(forward, -1.2);
       rear.y = 0.25;
       this.vfx.emitBoost(rear, forward);
     } else if (state.speed > 32) {
       // High-speed heat trail (seeded, not Math.random)
-      const rear = origin.clone().addScaledVector(forward, -1.0);
+      const rear = this.scratchRear.copy(origin).addScaledVector(forward, -1.0);
       rear.y = 0.2;
       if (this.rng() > 0.55) this.vfx.emitSparks(rear, 1, '#8ac8ff');
     }
@@ -1312,7 +1368,7 @@ export class Game {
 
   private emitBoostShock(player: PlayerRacer): void {
     const s = player.kart.state;
-    const pos = s.position.clone();
+    const pos = this.scratchOrigin.copy(s.position);
     pos.y = 0.2;
     this.vfx.emitShockwave(pos, '#7cf6ff');
     this.vfx.emitSparks(pos, 14, '#2de2ff');
@@ -1574,6 +1630,26 @@ export class Game {
         this.reducedMotion = enabled;
         this.render();
         this.publishDiagnostics();
+      },
+      /**
+       * The composer masks renderer.info (the last pass is a fullscreen quad),
+       * so measure the raw scene cost with one direct render.
+       */
+      measureDrawCalls: () => {
+        const info = this.renderer.info;
+        const autoReset = info.autoReset;
+        const previousTarget = this.renderer.getRenderTarget();
+        info.autoReset = false;
+        info.reset();
+        this.renderer.setScissorTest(false);
+        this.renderer.setRenderTarget(null);
+        this.renderer.render(this.scene, this.cameraP1);
+        const calls = info.render.calls;
+        const triangles = info.render.triangles;
+        info.autoReset = autoReset;
+        info.reset();
+        this.renderer.setRenderTarget(previousTarget);
+        return { calls, triangles, geometries: info.memory.geometries };
       },
       hideDebugUi: (_hidden: boolean) => {
         // no-op

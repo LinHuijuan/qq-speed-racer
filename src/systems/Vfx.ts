@@ -15,16 +15,26 @@ export class Vfx {
   private readonly colors: Float32Array;
   private readonly particles: Particle[] = [];
   private readonly geometry = new THREE.BufferGeometry();
+  private readonly positionAttr: THREE.BufferAttribute;
+  private readonly colorAttr: THREE.BufferAttribute;
   private readonly points: THREE.Points;
   private cursor = 0;
   private readonly max = 360;
   private rng = createSeededRandom(7);
+  private liveCount = 0;
+  private dirty = true;
+  private readonly scratch = new THREE.Vector3();
+  private readonly colorScratch = new THREE.Color();
+  private readonly colorCache = new Map<string, readonly [number, number, number]>();
 
   constructor() {
     this.positions = new Float32Array(this.max * 3);
     this.colors = new Float32Array(this.max * 3);
-    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+    this.positionAttr = new THREE.BufferAttribute(this.positions, 3);
+    this.colorAttr = new THREE.BufferAttribute(this.colors, 3);
+    this.geometry.setAttribute('position', this.positionAttr);
+    this.geometry.setAttribute('color', this.colorAttr);
+
     const material = new THREE.PointsMaterial({
       size: 0.38,
       vertexColors: true,
@@ -52,8 +62,8 @@ export class Vfx {
   emitDrift(origin: THREE.Vector3, direction: THREE.Vector3, intensity: number): void {
     const count = intensity > 0.5 ? 10 : 5;
     for (let i = 0; i < count; i += 1) {
-      const p = this.spawn(origin);
-      if (!p) return;
+      const index = this.spawn(origin);
+      const p = this.particles[index];
       p.maxLife = 0.55 + this.rng() * 0.45;
       p.life = p.maxLife;
       p.gravity = 5;
@@ -61,21 +71,21 @@ export class Vfx {
         .copy(direction)
         .multiplyScalar(-5 - this.rng() * 7)
         .add(
-          new THREE.Vector3(
+          this.scratch.set(
             (this.rng() - 0.5) * 3.2,
             2.2 + this.rng() * 2.4,
             (this.rng() - 0.5) * 3.2,
           ),
         );
       const c = this.rng();
-      this.setColor(p, c > 0.55 ? '#ff3cac' : c > 0.25 ? '#ff9ad5' : '#ffd166');
+      this.setColorAt(index, c > 0.55 ? '#ff3cac' : c > 0.25 ? '#ff9ad5' : '#ffd166');
     }
   }
 
   emitBoost(origin: THREE.Vector3, direction: THREE.Vector3): void {
     for (let i = 0; i < 5; i += 1) {
-      const p = this.spawn(origin);
-      if (!p) return;
+      const index = this.spawn(origin);
+      const p = this.particles[index];
       p.maxLife = 0.38 + this.rng() * 0.15;
       p.life = p.maxLife;
       p.gravity = 0;
@@ -83,13 +93,13 @@ export class Vfx {
         .copy(direction)
         .multiplyScalar(-16 - this.rng() * 12)
         .add(
-          new THREE.Vector3(
+          this.scratch.set(
             (this.rng() - 0.5) * 1.4,
             (this.rng() - 0.3) * 0.8,
             (this.rng() - 0.5) * 1.4,
           ),
         );
-      this.setColor(p, this.rng() > 0.5 ? '#7cf6ff' : '#b8f0ff');
+      this.setColorAt(index, this.rng() > 0.5 ? '#7cf6ff' : '#b8f0ff');
     }
   }
 
@@ -100,9 +110,10 @@ export class Vfx {
       const oy = 6 + this.rng() * 10;
       const oz = center.z + (this.rng() - 0.5) * 18;
       const color = colors[burst % colors.length] ?? '#ffffff';
+      const origin = this.scratch.set(ox, oy, oz);
       for (let i = 0; i < 28; i += 1) {
-        const p = this.spawn(new THREE.Vector3(ox, oy, oz));
-        if (!p) return;
+        const index = this.spawn(origin);
+        const p = this.particles[index];
         const a = (i / 28) * Math.PI * 2;
         const elev = (this.rng() - 0.3) * Math.PI;
         const sp = 4 + this.rng() * 7;
@@ -114,28 +125,28 @@ export class Vfx {
           Math.sin(elev) * sp * 0.7 + 2,
           Math.sin(a) * Math.cos(elev) * sp,
         );
-        this.setColor(p, color);
+        this.setColorAt(index, color);
       }
     }
   }
 
   emitShockwave(origin: THREE.Vector3, color = '#7cf6ff'): void {
     for (let i = 0; i < 18; i += 1) {
-      const p = this.spawn(origin);
-      if (!p) return;
+      const index = this.spawn(origin);
+      const p = this.particles[index];
       const a = (i / 18) * Math.PI * 2;
       p.maxLife = 0.55;
       p.life = p.maxLife;
       p.gravity = 1;
       p.velocity.set(Math.cos(a) * 7, 0.4 + this.rng() * 1.2, Math.sin(a) * 7);
-      this.setColor(p, color);
+      this.setColorAt(index, color);
     }
   }
 
   emitSparks(origin: THREE.Vector3, count = 10, color = '#ffd166'): void {
     for (let i = 0; i < count; i += 1) {
-      const p = this.spawn(origin);
-      if (!p) return;
+      const index = this.spawn(origin);
+      const p = this.particles[index];
       p.maxLife = 0.35 + this.rng() * 0.25;
       p.life = p.maxLife;
       p.gravity = 10;
@@ -144,32 +155,43 @@ export class Vfx {
         2 + this.rng() * 5,
         (this.rng() - 0.5) * 8,
       );
-      this.setColor(p, color);
+      this.setColorAt(index, color);
     }
   }
 
   update(delta: number): void {
-    for (let i = 0; i < this.max; i += 1) {
-      const p = this.particles[i];
-      if (p.life <= 0) continue;
-      p.life -= delta;
-      const idx = i * 3;
-      if (p.life <= 0) {
-        this.positions[idx + 1] = -999;
-        continue;
+    // Skip the whole pass (and both buffer uploads) when nothing is alive.
+    const needsUpload = this.dirty || this.liveCount > 0;
+    let live = 0;
+
+    if (needsUpload) {
+      for (let i = 0; i < this.max; i += 1) {
+        const p = this.particles[i];
+        if (p.life <= 0) continue;
+        p.life -= delta;
+        const idx = i * 3;
+        if (p.life <= 0) {
+          this.positions[idx + 1] = -999;
+          continue;
+        }
+        live += 1;
+        this.positions[idx] += p.velocity.x * delta;
+        this.positions[idx + 1] += p.velocity.y * delta;
+        this.positions[idx + 2] += p.velocity.z * delta;
+        p.velocity.y -= p.gravity * delta;
+        // Fade color toward black by scaling the stored color
+        const fade = p.life / p.maxLife;
+        const k = 0.92 + fade * 0.08;
+        this.colors[idx] *= k;
+        this.colors[idx + 1] *= k;
+        this.colors[idx + 2] *= k;
       }
-      this.positions[idx] += p.velocity.x * delta;
-      this.positions[idx + 1] += p.velocity.y * delta;
-      this.positions[idx + 2] += p.velocity.z * delta;
-      p.velocity.y -= p.gravity * delta;
-      // Fade color toward black by scaling stored color
-      const fade = p.life / p.maxLife;
-      this.colors[idx] *= 0.92 + fade * 0.08;
-      this.colors[idx + 1] *= 0.92 + fade * 0.08;
-      this.colors[idx + 2] *= 0.92 + fade * 0.08;
+      this.positionAttr.needsUpdate = true;
+      this.colorAttr.needsUpdate = true;
+      this.dirty = false;
     }
-    this.geometry.attributes.position.needsUpdate = true;
-    this.geometry.attributes.color.needsUpdate = true;
+
+    this.liveCount = live;
   }
 
   dispose(): void {
@@ -181,22 +203,26 @@ export class Vfx {
     this.rng = createSeededRandom(seed);
   }
 
-  private spawn(origin: THREE.Vector3): Particle | null {
-    const i = this.cursor;
+  /** Claims a slot in the ring buffer and writes the emission point. */
+  private spawn(origin: THREE.Vector3): number {
+    const index = this.cursor;
     this.cursor = (this.cursor + 1) % this.max;
-    const p = this.particles[i];
-    this.positions[i * 3] = origin.x;
-    this.positions[i * 3 + 1] = origin.y;
-    this.positions[i * 3 + 2] = origin.z;
-    return p;
+    this.positions[index * 3] = origin.x;
+    this.positions[index * 3 + 1] = origin.y;
+    this.positions[index * 3 + 2] = origin.z;
+    this.dirty = true;
+    return index;
   }
 
-  private setColor(particle: Particle, hex: string): void {
-    const index = this.particles.indexOf(particle);
-    if (index < 0) return;
-    const color = new THREE.Color(hex);
-    this.colors[index * 3] = color.r;
-    this.colors[index * 3 + 1] = color.g;
-    this.colors[index * 3 + 2] = color.b;
+  private setColorAt(index: number, hex: string): void {
+    let rgb = this.colorCache.get(hex);
+    if (!rgb) {
+      this.colorScratch.setStyle(hex);
+      rgb = [this.colorScratch.r, this.colorScratch.g, this.colorScratch.b];
+      this.colorCache.set(hex, rgb);
+    }
+    this.colors[index * 3] = rgb[0];
+    this.colors[index * 3 + 1] = rgb[1];
+    this.colors[index * 3 + 2] = rgb[2];
   }
 }

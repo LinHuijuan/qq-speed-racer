@@ -64,10 +64,8 @@ export class AIRacer {
     const state = this.kart.state;
     if (state.finished) {
       state.speed = Math.max(0, state.speed - 10 * delta);
-      state.position.addScaledVector(
-        new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading)),
-        state.speed * delta,
-      );
+      this.steerVec.set(Math.sin(state.heading), 0, Math.cos(state.heading));
+      state.position.addScaledVector(this.steerVec, state.speed * delta);
       this.kart.syncTransform(delta);
       return;
     }

@@ -351,7 +351,6 @@ export class PlayerRacer {
   }
 
   private resolveTrack(delta: number, track: Track, previousProgress: number): boolean {
-    void delta;
     const state = this.kart.state;
     state.progress = track.projectProgress(state.position, previousProgress);
     const { lateral, sample } = track.lateralOffset(state.position, state.progress);
@@ -371,7 +370,8 @@ export class PlayerRacer {
       state.speed *= 0.86;
       this.scrapeThisFrame = true;
       const tangentHeading = Math.atan2(sample.tangent.x, sample.tangent.z);
-      state.heading = THREE.MathUtils.damp(state.heading, tangentHeading, 3.5, 0.05);
+      // Real frame delta, not a fixed step — otherwise this is frame-rate dependent.
+      state.heading = THREE.MathUtils.damp(state.heading, tangentHeading, 3.5, Math.max(delta, 1e-4));
     }
 
     return track.collectBoostPad(state.position, 1.4);

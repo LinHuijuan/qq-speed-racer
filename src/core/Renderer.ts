@@ -3,14 +3,75 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { Pass } from 'three/addons/postprocessing/Pass.js';
 
 export type PostPipeline = {
   composer: EffectComposer;
   bloom: UnrealBloomPass;
+  /** Solo uses cameraA only; passing cameraB switches to the split-screen pass. */
+  setCameras: (cameraA: THREE.PerspectiveCamera, cameraB?: THREE.PerspectiveCamera) => void;
   resize: () => void;
   render: () => void;
   dispose: () => void;
 };
+
+/**
+ * Renders the scene twice into the same buffer with scissor clipping, so split
+ * screen can share the post chain (bloom etc.) instead of bypassing it.
+ */
+class SplitScreenRenderPass extends Pass {
+  private readonly drawingSize = new THREE.Vector2();
+
+  constructor(
+    private readonly scene: THREE.Scene,
+    public cameraA: THREE.PerspectiveCamera,
+    public cameraB: THREE.PerspectiveCamera,
+  ) {
+    super();
+    this.needsSwap = false;
+  }
+
+  render(
+    renderer: THREE.WebGLRenderer,
+    writeBuffer: THREE.WebGLRenderTarget,
+    readBuffer: THREE.WebGLRenderTarget,
+    deltaTime?: number,
+    maskActive?: boolean,
+  ): void {
+    void readBuffer;
+    void deltaTime;
+    void maskActive;
+
+    renderer.getDrawingBufferSize(this.drawingSize);
+    const width = Math.max(2, Math.floor(this.drawingSize.x));
+    const height = Math.max(1, Math.floor(this.drawingSize.y));
+    const half = Math.floor(width / 2);
+
+    const previousAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+
+    // Clear the whole target with scissor off, then clip only the draws.
+    // Clearing while a scissor rect is active would leave the other half's
+    // depth buffer stale.
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, width, height);
+    renderer.clear(true, true, false);
+
+    renderer.setScissorTest(true);
+    renderer.setViewport(0, 0, half, height);
+    renderer.setScissor(0, 0, half, height);
+    renderer.render(this.scene, this.cameraA);
+
+    renderer.setViewport(half, 0, width - half, height);
+    renderer.setScissor(half, 0, width - half, height);
+    renderer.render(this.scene, this.cameraB);
+
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, width, height);
+    renderer.autoClear = previousAutoClear;
+  }
+}
 
 export function createRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
   const renderer = new THREE.WebGLRenderer({
@@ -33,7 +94,13 @@ export function createPostPipeline(
   camera: THREE.PerspectiveCamera,
 ): PostPipeline {
   const composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
+
+  const singlePass = new RenderPass(scene, camera);
+  const splitPass = new SplitScreenRenderPass(scene, camera, camera);
+  splitPass.enabled = false;
+  composer.addPass(singlePass);
+  composer.addPass(splitPass);
+
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
     0.2,
@@ -46,6 +113,14 @@ export function createPostPipeline(
   return {
     composer,
     bloom,
+    setCameras: (cameraA, cameraB) => {
+      singlePass.camera = cameraA;
+      splitPass.cameraA = cameraA;
+      splitPass.cameraB = cameraB ?? cameraA;
+      const split = cameraB != null;
+      singlePass.enabled = !split;
+      splitPass.enabled = split;
+    },
     resize: () => {
       const width = renderer.domElement.clientWidth;
       const height = renderer.domElement.clientHeight;

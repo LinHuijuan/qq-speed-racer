@@ -41,6 +41,9 @@ export class Track {
   };
 
   private readonly startLine: THREE.Group;
+  /** Reused by lateralOffset so the per-kart hot path allocates nothing. */
+  private readonly lateralScratch = new THREE.Vector3();
+  private readonly lateralResult = { lateral: 0, sample: null as unknown as TrackSample };
 
   constructor(layoutId: TrackLayoutId = 'neon') {
     this.layout = getTrackLayout(layoutId);
@@ -104,9 +107,10 @@ export class Track {
 
   lateralOffset(position: THREE.Vector3, progress: number): { lateral: number; sample: TrackSample } {
     const sample = this.sampleAt(progress);
-    const toKart = position.clone().sub(sample.position);
-    const lateral = toKart.dot(sample.left);
-    return { lateral, sample };
+    this.lateralScratch.copy(position).sub(sample.position);
+    this.lateralResult.lateral = this.lateralScratch.dot(sample.left);
+    this.lateralResult.sample = sample;
+    return this.lateralResult;
   }
 
   update(delta: number, elapsed: number): void {
@@ -1305,21 +1309,22 @@ export class Track {
       transparent: true,
       opacity: 0.95,
     });
+    // Geometry and ring material are shared; only the pad glow material is
+    // cloned because its emissiveIntensity pulses per pad.
+    const ringGeometry = new THREE.RingGeometry(2.3, 2.7, 28);
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: '#7cf6ff',
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+    });
 
     return padTs.map((t) => {
       const sample = this.sampleAt(t);
-      const mesh = new THREE.Mesh(geometry.clone(), material.clone());
+      const mesh = new THREE.Mesh(geometry, material.clone());
       mesh.position.copy(sample.position);
       mesh.position.y = 0.14;
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(2.3, 2.7, 28),
-        new THREE.MeshBasicMaterial({
-          color: '#7cf6ff',
-          transparent: true,
-          opacity: 0.9,
-          side: THREE.DoubleSide,
-        }),
-      );
+      const ring = new THREE.Mesh(ringGeometry, ringMaterial);
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.02;
       mesh.add(ring);

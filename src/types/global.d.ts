@@ -13,6 +13,7 @@ declare global {
       setPausedForScreenshot: (paused: boolean) => void;
       setReducedMotion: (enabled: boolean) => void;
       hideDebugUi: (hidden: boolean) => void;
+      measureDrawCalls?: () => { calls: number; triangles: number; geometries: number };
     };
     __THREE_GAME_DIAGNOSTICS__?: {
       frame: number;

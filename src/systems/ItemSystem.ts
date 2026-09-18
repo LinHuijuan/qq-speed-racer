@@ -20,12 +20,25 @@ export type ActiveMine = {
 const BOX_RESPAWN = 5.5;
 const MINE_LIFE = 12;
 
+/** Shared across every box / mine — created once instead of per pickup. */
+const BOX_GEOMETRY = new THREE.BoxGeometry(0.95, 0.95, 0.95);
+const RING_GEOMETRY = new THREE.TorusGeometry(0.7, 0.06, 8, 24);
+const MINE_GEOMETRY = new THREE.SphereGeometry(0.35, 12, 12);
+
 export class ItemSystem {
   readonly group = new THREE.Group();
   readonly boxes: ItemBox[] = [];
   readonly mines: ActiveMine[] = [];
   private readonly rng: () => number;
   private readonly itemTypes: ItemType[] = ['turbo', 'turbo', 'missile', 'shield', 'mine'];
+  private readonly boxMaterial: THREE.MeshStandardMaterial;
+  private readonly ringMaterial = new THREE.MeshBasicMaterial({ color: '#7cf6ff' });
+  private readonly mineMaterial = new THREE.MeshStandardMaterial({
+    color: '#ff4f7a',
+    emissive: '#ff2a6d',
+    emissiveIntensity: 1.2,
+    roughness: 0.4,
+  });
 
   constructor(seed = 99) {
     let s = seed >>> 0;
@@ -36,6 +49,19 @@ export class ItemSystem {
       t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
+
+    const itemTex = loadGameTexture('/assets/item-box.png', { repeat: [1, 1] });
+    this.boxMaterial = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      map: itemTex,
+      emissive: '#9b6bff',
+      emissiveMap: itemTex,
+      emissiveIntensity: 0.75,
+      roughness: 0.25,
+      metalness: 0.4,
+      transparent: true,
+      opacity: 0.95,
+    });
   }
 
   build(track: Track): void {
@@ -84,15 +110,7 @@ export class ItemSystem {
     const back = new THREE.Vector3(-Math.sin(heading), 0, -Math.cos(heading));
     const pos = position.clone().addScaledVector(back, 2.2);
     pos.y = 0.15;
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.35, 12, 12),
-      new THREE.MeshStandardMaterial({
-        color: '#ff4f7a',
-        emissive: '#ff2a6d',
-        emissiveIntensity: 1.2,
-        roughness: 0.4,
-      }),
-    );
+    const mesh = new THREE.Mesh(MINE_GEOMETRY, this.mineMaterial);
     mesh.position.copy(pos);
     this.group.add(mesh);
     this.mines.push({ mesh, position: pos.clone(), life: MINE_LIFE });
@@ -104,8 +122,6 @@ export class ItemSystem {
       const mine = this.mines[i];
       if (mine.position.distanceTo(position) < radius) {
         this.group.remove(mine.mesh);
-        mine.mesh.geometry.dispose();
-        (mine.mesh.material as THREE.Material).dispose();
         this.mines.splice(i, 1);
         return true;
       }
@@ -131,55 +147,30 @@ export class ItemSystem {
       mine.life -= delta;
       if (mine.life <= 0) {
         this.group.remove(mine.mesh);
-        mine.mesh.geometry.dispose();
-        (mine.mesh.material as THREE.Material).dispose();
         this.mines.splice(i, 1);
       }
     }
   }
 
+  /** Detaches every box/mine. Shared geometries and materials are kept. */
   disposeMeshes(): void {
     while (this.group.children.length) {
-      const child = this.group.children[0];
-      this.group.remove(child);
-      child.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
-          obj.geometry.dispose();
-          const mat = obj.material;
-          if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-          else mat.dispose();
-        }
-      });
+      this.group.remove(this.group.children[0]);
     }
   }
 
   dispose(): void {
     this.disposeMeshes();
+    this.boxMaterial.dispose();
+    this.ringMaterial.dispose();
+    this.mineMaterial.dispose();
   }
 
   private createBoxMesh(): THREE.Group {
     const group = new THREE.Group();
-    const itemTex = loadGameTexture('/assets/item-box.png', { repeat: [1, 1] });
-    const core = new THREE.Mesh(
-      new THREE.BoxGeometry(0.95, 0.95, 0.95),
-      new THREE.MeshStandardMaterial({
-        color: '#ffffff',
-        map: itemTex,
-        emissive: '#9b6bff',
-        emissiveMap: itemTex,
-        emissiveIntensity: 0.75,
-        roughness: 0.25,
-        metalness: 0.4,
-        transparent: true,
-        opacity: 0.95,
-      }),
-    );
-    group.add(core);
+    group.add(new THREE.Mesh(BOX_GEOMETRY, this.boxMaterial));
 
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(0.7, 0.06, 8, 24),
-      new THREE.MeshBasicMaterial({ color: '#7cf6ff' }),
-    );
+    const ring = new THREE.Mesh(RING_GEOMETRY, this.ringMaterial);
     ring.rotation.x = Math.PI / 2;
     group.add(ring);
 
