@@ -51,6 +51,11 @@ export class Hud {
   private readonly nitroFlash = this.el('#nitro-flash');
   private readonly statusLine = this.el('#status-line');
   private readonly driftHint = this.el('#drift-hint');
+  /**
+   * Mirrors the stylesheet's touch breakpoint. The drift hint is set from here
+   * rather than the markup, so it has to pick its own wording.
+   */
+  private readonly touchLayout = window.matchMedia('(pointer: coarse), (max-width: 820px)');
   private readonly countdown = this.el('#countdown');
   private readonly overlayStart = this.el('#overlay-start');
   private readonly overlayFinish = this.el('#overlay-finish');
@@ -253,7 +258,9 @@ export class Hud {
       this.driftHint.textContent = '氮气加速中！';
       this.driftHint.style.color = '#2de2ff';
     } else {
-      this.driftHint.textContent = '按住 Shift / Z 漂移蓄能';
+      this.driftHint.textContent = this.touchLayout.matches
+        ? '按住 漂移 键蓄能'
+        : '按住 Shift / Z 漂移蓄能';
       this.driftHint.style.color = '';
     }
 

@@ -14,6 +14,16 @@
   --radius-sm: 10px;
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
   --glow-cyan: 0 0 24px rgba(45, 226, 255, 0.28);
+  /* On-screen touch pad geometry. The pad is as tall as its tallest child — the
+     stick or the 2x2 action grid — and .hud-bottom is offset from it, so the two
+     cannot drift into each other when either one is resized. */
+  --pad-inset: 16px;
+  --pad-stick: clamp(112px, 28vw, 148px);
+  --pad-btn-w: 76px;
+  --pad-btn-h: 64px;
+  --pad-gap: 10px;
+  --pad-actions-h: calc(var(--pad-btn-h) * 2 + var(--pad-gap));
+  --pad-h: max(var(--pad-stick), var(--pad-actions-h));
   --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   font-family: var(--font);
   font-synthesis: none;
@@ -645,6 +655,11 @@ kbd {
   font-size: 0.68rem;
 }
 
+/* Only one of the two wordings is ever shown; see the touch media query. */
+.hint-touch {
+  display: none;
+}
+
 @keyframes item-pulse {
   0%,
   100% {
@@ -987,7 +1002,7 @@ kbd {
 #touch-controls {
   position: absolute;
   right: max(16px, env(safe-area-inset-right));
-  bottom: max(16px, env(safe-area-inset-bottom));
+  bottom: max(var(--pad-inset), env(safe-area-inset-bottom));
   left: max(16px, env(safe-area-inset-left));
   display: none;
   justify-content: space-between;
@@ -998,7 +1013,7 @@ kbd {
 
 #touch-stick {
   position: relative;
-  width: clamp(112px, 28vw, 148px);
+  width: var(--pad-stick);
   aspect-ratio: 1;
   border: 1px solid rgba(45, 226, 255, 0.35);
   border-radius: 50%;
@@ -1028,12 +1043,12 @@ kbd {
 .touch-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: var(--pad-gap);
 }
 
 .touch-actions button {
-  width: 76px;
-  height: 64px;
+  width: var(--pad-btn-w);
+  height: var(--pad-btn-h);
   border: 1px solid rgba(238, 244, 255, 0.28);
   border-radius: 16px;
   color: var(--ink);
@@ -1437,8 +1452,20 @@ body.duo-mode #touch-controls {
     display: flex;
   }
 
+  /* Keyboard wording is meaningless on a touch layout — swap it for the label of
+     the on-screen button that does the same job. */
+  .hint-keyboard {
+    display: none;
+  }
+
+  .hint-touch {
+    display: inline;
+  }
+
   .hud-bottom {
-    bottom: max(128px, calc(env(safe-area-inset-bottom) + 128px));
+    /* Clear the touch pad. Derived from the pad's own height so a change to the
+       stick or the button grid can never make the HUD sit on top of the pad. */
+    bottom: calc(var(--pad-h) + max(var(--pad-inset), env(safe-area-inset-bottom)) + 12px);
   }
 
   .panel {
@@ -1470,6 +1497,26 @@ body.duo-mode #touch-controls {
 
   .finish-stats {
     grid-template-columns: 1fr;
+  }
+}
+
+/*
+ * Narrow phones: the speed cluster plus the nitro panel and item slot need
+ * 152 + 16 + (min(210px, 46vw) + 96) px, which only fits once the viewport is
+ * about 506px wide. Below that the item slot was pushed clean off the right
+ * edge — the player could not see the item they were holding. Stack the right
+ * group instead of letting it overflow.
+ */
+@media (max-width: 560px) {
+  .hud-bottom-right {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .item-cluster {
+    margin-left: 0;
+    justify-items: end;
   }
 }
 
