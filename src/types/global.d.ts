@@ -10,6 +10,7 @@ declare global {
       setTrack?: (id: string) => { track: string };
       forceRace?: () => { phase: string; mode: string };
       setState: (name: string) => { state: string };
+      grantItem?: (type?: string) => { item: string | null };
       setPausedForScreenshot: (paused: boolean) => void;
       setReducedMotion: (enabled: boolean) => void;
       hideDebugUi: (hidden: boolean) => void;

@@ -345,9 +345,13 @@ export class Game {
   private async continueSavedRace(): Promise<void> {
     const save = loadRace();
     if (!save) return;
-    await this.audio.unlock();
-    this.audio.setMuted(this.settings.muted);
-    this.audio.startEngine();
+    try {
+      await this.audio.unlock();
+      this.audio.setMuted(this.settings.muted);
+      this.audio.startEngine();
+    } catch {
+      // Audio may be blocked in headless / autoplay policies; race still resumes.
+    }
 
     if (save.trackId !== this.trackId) this.selectTrack(save.trackId as TrackLayoutId);
     if (save.mode !== this.mode) this.selectMode(save.mode);
@@ -1622,6 +1626,17 @@ export class Game {
         this.render();
         this.publishDiagnostics();
         return { state: name };
+      },
+      /**
+       * Hands the player an item without having to drive over a box. Item boxes
+       * sit at randomised lateral offsets, so collection is not deterministic.
+       */
+      grantItem: (type?: string) => {
+        this.player1.setItem((type as ItemType | undefined) ?? 'turbo');
+        this.updateHud();
+        this.render();
+        this.publishDiagnostics();
+        return { item: this.player1.getItem() };
       },
       setPausedForScreenshot: (paused: boolean) => {
         this.pausedForScreenshot = paused;

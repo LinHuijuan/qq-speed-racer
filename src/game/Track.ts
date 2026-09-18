@@ -27,6 +27,11 @@ export type BoostPad = {
 const ROAD_HALF_WIDTH = 7.5;
 const SAMPLE_COUNT = 420;
 const BOOST_RESPAWN = 4.5;
+/**
+ * How far down the road the start line looks when deciding which way it faces.
+ * In world units, so it behaves the same on every layout.
+ */
+const START_LINE_LOOKAHEAD = 8;
 
 export class Track {
   readonly group = new THREE.Group();
@@ -174,6 +179,38 @@ export class Track {
         halfWidth: ROAD_HALF_WIDTH,
         curvature,
       });
+    }
+    this.fixStartLineTangent();
+  }
+
+  /**
+   * getTangentAt(0) on a closed CatmullRomCurve3 blends the incoming and outgoing
+   * legs, so when the start line sits on a turn it points off the road — 39 deg out
+   * on the neon layout. Everything downstream inherits the error: the road
+   * cross-section (and so the mesh itself), the painted start line, the spawn
+   * heading, respawns near progress 0, and the AI grid stagger. Aim at where the
+   * road actually goes instead, measured far enough ahead that the local cusp
+   * doesn't skew it.
+   */
+  private fixStartLineTangent(): void {
+    const seam = this.samples[0];
+    if (!seam) return;
+    const spacing = this.length / SAMPLE_COUNT;
+    const lookahead = Math.max(1, Math.round(START_LINE_LOOKAHEAD / spacing));
+    const aim = this.samples[Math.min(lookahead, SAMPLE_COUNT - 1)];
+    const dx = aim.position.x - seam.position.x;
+    const dz = aim.position.z - seam.position.z;
+    if (dx === 0 && dz === 0) return;
+    seam.tangent.set(dx, 0, dz).normalize();
+    seam.left.set(-seam.tangent.z, 0, seam.tangent.x);
+
+    // Keep curvature on the same footing: the turn between here and a matching
+    // distance further on, so AI nitro and straight-line scenery still agree.
+    const beyond = this.samples[Math.min(lookahead * 2, SAMPLE_COUNT - 1)];
+    const bx = beyond.position.x - aim.position.x;
+    const bz = beyond.position.z - aim.position.z;
+    if (bx !== 0 || bz !== 0) {
+      seam.curvature = seam.tangent.angleTo(new THREE.Vector3(bx, 0, bz).normalize());
     }
   }
 
