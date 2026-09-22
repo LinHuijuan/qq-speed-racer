@@ -250,6 +250,16 @@ export class Kart {
   private readonly driftGlow: THREE.PointLight;
   private readonly materials: THREE.Material[] = [];
   private readonly name: string;
+  /** Accumulated simulation time for the flame flicker. Using the wall clock
+   *  here meant the exhaust kept flickering under "reduce motion", and made the
+   *  flame depend on how fast the machine happened to be rendering. */
+  private flamePhase = 0;
+  private reducedMotion = false;
+
+  /** The exhaust flicker is decoration; freeze it when motion is reduced. */
+  setReducedMotion(reduced: boolean): void {
+    this.reducedMotion = reduced;
+  }
 
   constructor(private readonly config: KartConfig) {
     this.name = config.name;
@@ -337,6 +347,7 @@ export class Kart {
   }
 
   syncTransform(delta: number): void {
+    this.flamePhase += this.reducedMotion ? 0 : delta;
     this.group.position.copy(this.state.position);
     this.group.position.y = 0;
     this.group.rotation.y = this.state.heading + this.state.driftAngle;
@@ -351,7 +362,7 @@ export class Kart {
     }
 
     const boostStrength = this.state.isBoosting ? 1 : 0;
-    const flicker = 0.85 + Math.sin(performance.now() * 0.04) * 0.15;
+    const flicker = 0.85 + Math.sin(this.flamePhase * 40) * 0.15;
     for (const flame of this.boostFlames) {
       const mat = flame.material as THREE.MeshBasicMaterial;
       mat.opacity = THREE.MathUtils.lerp(mat.opacity, boostStrength * 1, Math.min(1, delta * 16));

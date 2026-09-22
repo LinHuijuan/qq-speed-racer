@@ -757,7 +757,16 @@ kbd {
   font-weight: 600;
 }
 
-.panel button {
+/*
+ * Scoped to direct children on purpose. As a plain `.panel button` this rule
+ * (0,1,1) outranked every secondary button class (0,1,0), so the track cards,
+ * car cards, mode pills, difficulty pills and the mute toggle all silently
+ * rendered as primary gradient buttons — and inherited `min-width: 200px`,
+ * which pushed the fourth car card and the third difficulty pill off the panel.
+ * The intended look (flat dark pills, gradient only when `.active`) is defined
+ * on those classes; they just have to win.
+ */
+.panel > button {
   min-width: 200px;
   min-height: 48px;
   margin-top: 10px;
@@ -777,12 +786,12 @@ kbd {
   box-shadow: 0 8px 24px rgba(45, 226, 255, 0.2);
 }
 
-.panel button:hover {
+.panel > button:hover {
   filter: brightness(1.1);
   box-shadow: 0 10px 28px rgba(45, 226, 255, 0.32);
 }
 
-.panel button:active {
+.panel > button:active {
   transform: translateY(1px);
 }
 
@@ -815,6 +824,9 @@ kbd {
   background: rgba(45, 226, 255, 0.15);
   color: var(--ink);
   font-weight: 700;
+  /* Used to be inherited from `.panel button`. */
+  font-size: 0.9rem;
+  border-radius: 999px;
   cursor: pointer;
 }
 
@@ -831,7 +843,9 @@ kbd {
 .diff-btn {
   min-width: 56px;
   min-height: 34px;
+  padding: 0 12px;
   border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -1085,12 +1099,20 @@ kbd {
   color: #1a1408;
 }
 
-/* Off-track help toast */
+/* Off-track help toast.
+ *
+ * It used to be bottom-anchored, which put it on top of the virtual joystick on
+ * every touch viewport and on top of .hud-bottom on desktop — the one control
+ * the message is telling the player to use was hidden behind the message.
+ * The top strip is fixed-height (chips + status line), so anchoring it just
+ * under the status line cannot collide with the pad or the bottom clusters.
+ */
 #offtrack-help {
   position: absolute;
-  bottom: max(120px, calc(env(safe-area-inset-bottom) + 120px));
+  top: calc(max(92px, calc(env(safe-area-inset-top) + 92px)) + 46px);
   left: 50%;
   transform: translateX(-50%);
+  max-width: min(92vw, 420px);
   padding: 12px 18px;
   border: 1px solid rgba(255, 209, 102, 0.55);
   border-radius: var(--radius-sm);
@@ -1098,6 +1120,7 @@ kbd {
   color: #ffd166;
   font-weight: 700;
   font-size: 0.9rem;
+  text-align: center;
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.2s ease;
@@ -1107,10 +1130,6 @@ kbd {
 
 #offtrack-help.visible {
   opacity: 1;
-}
-
-body.duo-mode #offtrack-help {
-  bottom: max(150px, calc(env(safe-area-inset-bottom) + 150px));
 }
 
 .mode-select {
@@ -1129,6 +1148,9 @@ body.duo-mode #offtrack-help {
   background: rgba(10, 16, 32, 0.72);
   color: var(--muted);
   font-weight: 700;
+  /* Used to be inherited from `.panel button`. */
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
   cursor: pointer;
   transition:
     background 0.15s ease,
@@ -1468,11 +1490,18 @@ body.duo-mode #touch-controls {
     bottom: calc(var(--pad-h) + max(var(--pad-inset), env(safe-area-inset-bottom)) + 12px);
   }
 
+  /* Tracks the status line's own (smaller) offset so the toast stays glued
+     under it instead of drifting into the HUD chips or the banner. */
+  #offtrack-help {
+    top: calc(max(88px, calc(env(safe-area-inset-top) + 88px)) + 44px);
+    font-size: 0.82rem;
+  }
+
   .panel {
     padding: 24px 18px 22px;
   }
 
-  .panel button {
+  .panel > button {
     width: 100%;
     min-width: 0;
   }
@@ -1527,5 +1556,19 @@ body.duo-mode #touch-controls {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * Short landscape screens (a phone turned sideways is ~390px tall) leave no
+ * free horizontal band: at the toast's height the speed cluster ends at x=168
+ * and the nitro panel starts around x=522, with the status line sitting between
+ * them. Anything wide enough to read collides with one of them, so the toast is
+ * dropped rather than stacked on a control. Nothing is lost — the status line
+ * already reports 冲出赛道, and the touch pad keeps a labelled 「回道」 button.
+ */
+@media (max-height: 480px) {
+  #offtrack-help {
+    display: none;
   }
 }

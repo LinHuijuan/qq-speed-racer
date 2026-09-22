@@ -159,6 +159,11 @@ export class Vfx {
     }
   }
 
+  /** Live particle count — 0 means the update pass is being skipped entirely. */
+  get live(): number {
+    return this.liveCount;
+  }
+
   update(delta: number): void {
     // Skip the whole pass (and both buffer uploads) when nothing is alive.
     const needsUpload = this.dirty || this.liveCount > 0;

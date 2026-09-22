@@ -5,6 +5,13 @@ export type MinimapDot = {
   isPlayer?: boolean;
 };
 
+/**
+ * The minimap is a decoration, not a readout — 15fps is indistinguishable from
+ * 60fps here and saves a full canvas repaint on every frame.
+ */
+const MINIMAP_INTERVAL_MS = 66;
+const MINIMAP_PAD = 8;
+
 export type HudMode = 'solo' | 'duo';
 
 export type RaceHudState = {
@@ -85,6 +92,39 @@ export class Hud {
   ];
   private readonly rankLabel = this.el('#rank-label');
   private trackBounds: { minX: number; maxX: number; minZ: number; maxZ: number } | null = null;
+  /** Static track outline, rendered once instead of re-stroking every frame. */
+  private minimapBase: HTMLCanvasElement | null = null;
+  private lastMinimapAt = 0;
+  /**
+   * Last value written to each HUD element. `update()` runs on every frame and
+   * used to push ~25 DOM writes unconditionally, which kept the style engine
+   * busy even when nothing had changed (which is most frames).
+   */
+  private readonly last = {
+    rank: '',
+    lap: '',
+    timer: '',
+    best: '',
+    speed: '',
+    arc: '',
+    hot: false,
+    gear: '',
+    nitroPct: '',
+    nitroFull: false,
+    pips: -1,
+    driftScore: '',
+    itemIcon: '',
+    hasItem: false,
+    p2Speed: '',
+    p2Gear: '',
+    p2NitroPct: '',
+    p2Pips: -1,
+    p2ItemIcon: '',
+    p2HasItem: false,
+    hint: '',
+    hintColor: '',
+    status: '',
+  };
 
   setMode(mode: HudMode): void {
     this.duoPanel.style.display = mode === 'duo' ? '' : 'none';
@@ -94,6 +134,8 @@ export class Hud {
 
   resetMinimapBounds(): void {
     this.trackBounds = null;
+    this.minimapBase = null;
+    this.lastMinimapAt = 0;
   }
 
   setTrackName(name: string): void {
@@ -200,71 +242,155 @@ export class Hud {
   }
 
   update(state: RaceHudState): void {
-    this.rankValue.textContent = String(state.rank);
-    this.lapValue.textContent = String(Math.min(state.lap, state.totalLaps));
-    this.timerValue.textContent = formatTime(state.time);
-    this.bestValue.textContent = state.bestLap == null ? '--:--.--' : formatTime(state.bestLap);
-    this.speedValue.textContent = String(Math.round(state.speedKmh));
+    const last = this.last;
+
+    const rankText = String(state.rank);
+    if (rankText !== last.rank) {
+      last.rank = rankText;
+      this.rankValue.textContent = rankText;
+    }
+
+    const lapText = String(Math.min(state.lap, state.totalLaps));
+    if (lapText !== last.lap) {
+      last.lap = lapText;
+      this.lapValue.textContent = lapText;
+    }
+
+    const timeText = formatTime(state.time);
+    if (timeText !== last.timer) {
+      last.timer = timeText;
+      this.timerValue.textContent = timeText;
+    }
+
+    const bestText = state.bestLap == null ? '--:--.--' : formatTime(state.bestLap);
+    if (bestText !== last.best) {
+      last.best = bestText;
+      this.bestValue.textContent = bestText;
+    }
+
+    const speedText = String(Math.round(state.speedKmh));
+    if (speedText !== last.speed) {
+      last.speed = speedText;
+      this.speedValue.textContent = speedText;
+    }
 
     const circumference = 2 * Math.PI * 52;
     const arcLength = 220;
     const ratio = THREE_CLAMP(state.speedKmh / 280, 0, 1);
     const dash = arcLength * ratio;
-    this.speedArc.style.strokeDasharray = `${dash} ${circumference - dash}`;
-    this.speedArc.classList.toggle('hot', state.boosting);
+    const arcText = `${dash} ${circumference - dash}`;
+    if (arcText !== last.arc) {
+      last.arc = arcText;
+      this.speedArc.style.strokeDasharray = arcText;
+    }
+    if (state.boosting !== last.hot) {
+      last.hot = state.boosting;
+      this.speedArc.classList.toggle('hot', state.boosting);
+    }
 
-    this.gearValue.textContent = state.gear;
-    this.nitroFill.style.width = `${Math.round(state.nitro * 100)}%`;
-    this.nitroFill.classList.toggle('full', state.nitro >= 0.98);
-    this.nitroPercent.textContent = `${Math.round(state.nitro * 100)}%`;
+    if (state.gear !== last.gear) {
+      last.gear = state.gear;
+      this.gearValue.textContent = state.gear;
+    }
 
-    for (let i = 0; i < 3; i += 1) {
-      this.driftPips[i]?.classList.toggle('on', state.driftChargeLevel > i);
+    const nitroPct = `${Math.round(state.nitro * 100)}%`;
+    if (nitroPct !== last.nitroPct) {
+      last.nitroPct = nitroPct;
+      this.nitroFill.style.width = nitroPct;
+      this.nitroPercent.textContent = nitroPct;
+    }
+    const nitroFull = state.nitro >= 0.98;
+    if (nitroFull !== last.nitroFull) {
+      last.nitroFull = nitroFull;
+      this.nitroFill.classList.toggle('full', nitroFull);
+    }
+
+    if (state.driftChargeLevel !== last.pips) {
+      last.pips = state.driftChargeLevel;
+      for (let i = 0; i < 3; i += 1) {
+        this.driftPips[i]?.classList.toggle('on', state.driftChargeLevel > i);
+      }
     }
     if (state.driftScore != null) {
-      this.driftScore.textContent = `漂移分 ${state.driftScore}`;
+      const scoreText = `漂移分 ${state.driftScore}`;
+      if (scoreText !== last.driftScore) {
+        last.driftScore = scoreText;
+        this.driftScore.textContent = scoreText;
+      }
     }
 
-    if (state.item) {
-      this.itemSlot.classList.add('has-item');
-      this.itemIcon.textContent = state.itemLabel;
-    } else {
-      this.itemSlot.classList.remove('has-item');
-      this.itemIcon.textContent = '—';
+    const itemIcon = state.item ? state.itemLabel : '—';
+    if (itemIcon !== last.itemIcon) {
+      last.itemIcon = itemIcon;
+      this.itemIcon.textContent = itemIcon;
+    }
+    const hasItem = !!state.item;
+    if (hasItem !== last.hasItem) {
+      last.hasItem = hasItem;
+      this.itemSlot.classList.toggle('has-item', hasItem);
     }
 
     if (state.mode === 'duo') {
-      this.p2Speed.textContent = String(Math.round(state.speed2Kmh ?? 0));
-      this.p2Gear.textContent = state.gear2 ?? 'N';
-      const n2 = state.nitro2 ?? 0;
-      this.p2Nitro.style.width = `${Math.round(n2 * 100)}%`;
-      this.p2NitroPct.textContent = `${Math.round(n2 * 100)}%`;
-      for (let i = 0; i < 3; i += 1) {
-        this.p2Pips[i]?.classList.toggle('on', (state.driftChargeLevel2 ?? 0) > i);
+      const p2Speed = String(Math.round(state.speed2Kmh ?? 0));
+      if (p2Speed !== last.p2Speed) {
+        last.p2Speed = p2Speed;
+        this.p2Speed.textContent = p2Speed;
       }
-      if (state.item2) {
-        this.p2ItemSlot.classList.add('has-item');
-        this.p2Item.textContent = state.itemLabel2 ?? '—';
-      } else {
-        this.p2ItemSlot.classList.remove('has-item');
-        this.p2Item.textContent = '—';
+      const p2Gear = state.gear2 ?? 'N';
+      if (p2Gear !== last.p2Gear) {
+        last.p2Gear = p2Gear;
+        this.p2Gear.textContent = p2Gear;
+      }
+      const p2Nitro = `${Math.round((state.nitro2 ?? 0) * 100)}%`;
+      if (p2Nitro !== last.p2NitroPct) {
+        last.p2NitroPct = p2Nitro;
+        this.p2Nitro.style.width = p2Nitro;
+        this.p2NitroPct.textContent = p2Nitro;
+      }
+      const p2Level = state.driftChargeLevel2 ?? 0;
+      if (p2Level !== last.p2Pips) {
+        last.p2Pips = p2Level;
+        for (let i = 0; i < 3; i += 1) {
+          this.p2Pips[i]?.classList.toggle('on', p2Level > i);
+        }
+      }
+      const p2Icon = state.item2 ? (state.itemLabel2 ?? '—') : '—';
+      if (p2Icon !== last.p2ItemIcon) {
+        last.p2ItemIcon = p2Icon;
+        this.p2Item.textContent = p2Icon;
+      }
+      const p2HasItem = !!state.item2;
+      if (p2HasItem !== last.p2HasItem) {
+        last.p2HasItem = p2HasItem;
+        this.p2ItemSlot.classList.toggle('has-item', p2HasItem);
       }
     }
 
+    let hint: string;
+    let hintColor: string;
     if (state.drifting) {
-      this.driftHint.textContent = '漂移充能中…';
-      this.driftHint.style.color = '#ff9ad5';
+      hint = '漂移充能中…';
+      hintColor = '#ff9ad5';
     } else if (state.boosting) {
-      this.driftHint.textContent = '氮气加速中！';
-      this.driftHint.style.color = '#2de2ff';
+      hint = '氮气加速中！';
+      hintColor = '#2de2ff';
     } else {
-      this.driftHint.textContent = this.touchLayout.matches
-        ? '按住 漂移 键蓄能'
-        : '按住 Shift / Z 漂移蓄能';
-      this.driftHint.style.color = '';
+      hint = this.touchLayout.matches ? '按住 漂移 键蓄能' : '按住 Shift / Z 漂移蓄能';
+      hintColor = '';
+    }
+    if (hint !== last.hint) {
+      last.hint = hint;
+      this.driftHint.textContent = hint;
+    }
+    if (hintColor !== last.hintColor) {
+      last.hintColor = hintColor;
+      this.driftHint.style.color = hintColor;
     }
 
-    this.statusLine.textContent = state.status;
+    if (state.status !== last.status) {
+      last.status = state.status;
+      this.statusLine.textContent = state.status;
+    }
 
     if (state.trackPath && state.dots) {
       this.drawMinimap(state.trackPath, state.dots);
@@ -272,8 +398,13 @@ export class Hud {
   }
 
   private drawMinimap(path: Array<{ x: number; z: number }>, dots: MinimapDot[]): void {
+    if (path.length < 2) return;
+    const now = performance.now();
+    if (now - this.lastMinimapAt < MINIMAP_INTERVAL_MS) return;
+    this.lastMinimapAt = now;
+
     const ctx = this.minimap.getContext('2d');
-    if (!ctx || path.length < 2) return;
+    if (!ctx) return;
 
     if (!this.trackBounds) {
       let minX = Infinity;
@@ -286,12 +417,11 @@ export class Hud {
         minZ = Math.min(minZ, p.z);
         maxZ = Math.max(maxZ, p.z);
       }
-      const pad = 8;
       this.trackBounds = {
-        minX: minX - pad,
-        maxX: maxX + pad,
-        minZ: minZ - pad,
-        maxZ: maxZ + pad,
+        minX: minX - MINIMAP_PAD,
+        maxX: maxX + MINIMAP_PAD,
+        minZ: minZ - MINIMAP_PAD,
+        maxZ: maxZ + MINIMAP_PAD,
       };
     }
 
@@ -302,18 +432,7 @@ export class Hud {
     const sy = (z: number) => ((z - minZ) / (maxZ - minZ)) * h;
 
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = 'rgba(4, 8, 18, 0.35)';
-    ctx.fillRect(0, 0, w, h);
-
-    ctx.beginPath();
-    ctx.moveTo(sx(path[0].x), sy(path[0].z));
-    for (let i = 1; i < path.length; i += 1) {
-      ctx.lineTo(sx(path[i].x), sy(path[i].z));
-    }
-    ctx.closePath();
-    ctx.strokeStyle = 'rgba(45, 226, 255, 0.85)';
-    ctx.lineWidth = 3;
-    ctx.stroke();
+    ctx.drawImage(this.minimapBaseCanvas(path, sx, sy), 0, 0);
 
     for (const dot of dots) {
       ctx.beginPath();
@@ -326,6 +445,42 @@ export class Hud {
         ctx.stroke();
       }
     }
+  }
+
+  /**
+   * The track outline never changes, so it is stroked once into an offscreen
+   * canvas and blitted afterwards instead of being re-pathed on every repaint.
+   */
+  private minimapBaseCanvas(
+    path: Array<{ x: number; z: number }>,
+    sx: (x: number) => number,
+    sy: (z: number) => number,
+  ): HTMLCanvasElement {
+    if (this.minimapBase) return this.minimapBase;
+    const w = this.minimap.width;
+    const h = this.minimap.height;
+    const base = document.createElement('canvas');
+    base.width = w;
+    base.height = h;
+    const ctx = base.getContext('2d');
+    if (!ctx) return base;
+
+    ctx.fillStyle = 'rgba(4, 8, 18, 0.35)';
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.beginPath();
+    ctx.moveTo(sx(path[0].x), sy(path[0].z));
+    for (let i = 1; i < path.length; i += 1) {
+      ctx.lineTo(sx(path[i].x), sy(path[i].z));
+    }
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(45, 226, 255, 0.85)';
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    this.minimapBase = base;
+    return base;
   }
 
   private el(selector: string): HTMLElement {

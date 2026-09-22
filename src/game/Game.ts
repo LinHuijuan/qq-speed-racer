@@ -16,7 +16,7 @@ import type { Kart } from '../entities/Kart';
 import { PlayerRacer } from '../entities/PlayerRacer';
 import { AudioSystem } from '../systems/AudioSystem';
 import { CameraRig } from '../systems/CameraRig';
-import { Hud, type MinimapDot } from '../systems/Hud';
+import { Hud, type MinimapDot, type RaceHudState } from '../systems/Hud';
 import { Vfx } from '../systems/Vfx';
 import { ItemSystem, type ItemType } from '../systems/ItemSystem';
 import {
@@ -37,12 +37,22 @@ const TOTAL_LAPS = 3;
 const COUNTDOWN_SECONDS = 3.4;
 /** Picture-in-picture refresh interval — it costs a second scene render. */
 const PIP_INTERVAL = 1 / 20;
+/**
+ * Minimum spacing between "尾流" toasts. The slipstream branch runs every frame
+ * while drafting, so without a cooldown the HUD appended a chip per frame.
+ */
+const SLIPSTREAM_TOAST_INTERVAL = 1.6;
 
 type RacePhase = 'menu' | 'countdown' | 'racing' | 'finished';
 
 function emptyInput(): RaceInputFrame {
   return { throttle: 0, brake: 0, steer: 0, drift: false, nitro: false, useItem: false, reset: false };
 }
+
+/** Two AI colours; the minimap walks this list. Module-level so it is not
+ *  rebuilt (and re-allocated) on every HUD push. */
+const AI_MINIMAP_COLORS = ['#ff3cac', '#7cff6b'];
+const MINIMAP_STRIDE = 8;
 
 function itemLabel(item: ItemType | null): string {
   switch (item) {
@@ -110,6 +120,51 @@ export class Game {
   private readonly scratchSide = new THREE.Vector3();
   private readonly scratchRear = new THREE.Vector3();
   private readonly kartRefs: Array<{ kart: Kart }> = [];
+  /** Reused by rankOf — it runs twice per frame and must not allocate. */
+  private readonly rankScratch: Array<{
+    finished: boolean;
+    finishTime: number;
+    totalProgress: number;
+  }> = [];
+  /** Reused by updateHud so the per-frame HUD push allocates nothing. */
+  private readonly hudDots: MinimapDot[] = [];
+  /** Pooled dot records — mutated in place rather than re-created per frame. */
+  private readonly dotPool: MinimapDot[] = [
+    { x: 0, z: 0, color: '#2de2ff', isPlayer: true },
+    { x: 0, z: 0, color: '#ffd166', isPlayer: true },
+    { x: 0, z: 0, color: '#ff3cac', isPlayer: false },
+    { x: 0, z: 0, color: '#7cff6b', isPlayer: false },
+  ];
+  private readonly hudState = {
+    mode: 'solo',
+    rank: 1,
+    rank2: 1,
+    totalRacers: 4,
+    lap: 1,
+    lap2: 1,
+    totalLaps: TOTAL_LAPS,
+    time: 0,
+    bestLap: null,
+    speedKmh: 0,
+    speed2Kmh: 0,
+    nitro: 0,
+    nitro2: 0,
+    boosting: false,
+    boosting2: false,
+    drifting: false,
+    status: '',
+    gear: 'N',
+    gear2: 'N',
+    driftChargeLevel: 0,
+    driftChargeLevel2: 0,
+    driftScore: 0,
+    item: null,
+    item2: null,
+    itemLabel: '—',
+    itemLabel2: '—',
+    trackPath: undefined,
+    dots: undefined,
+  } as unknown as RaceHudState;
 
   private readonly inputP1 = emptyInput();
   private readonly inputP2 = emptyInput();
@@ -139,8 +194,21 @@ export class Game {
   private minimapPath: Array<{ x: number; z: number }> | null = null;
   private rng = createSeededRandom(7);
   private pausedForScreenshot = false;
-  private reducedMotion = false;
+  /**
+   * Honours the OS "reduce motion" preference. The stylesheet already reacts to
+   * it, but the 3D scene did not: particles, camera shake and the full-screen
+   * boost flash all kept running. The test hook can override it either way.
+   */
+  private readonly motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  private reducedMotion = this.motionQuery.matches;
+  /** Animation clock driven by `animDelta`, so it freezes with reduced motion. */
+  private animElapsed = 0;
   private elapsed = 0;
+  private slipstreamToastCooldown = 0;
+  private lastSpeedLineOpacity = -1;
+  private lastSpeedLinesBoost = false;
+  private lastSpeedLinesDrift = false;
+  private lastOffTrackHelpVisible = false;
   private readonly startButton = this.getElement('#start-button');
   private readonly continueButton = this.getElement('#continue-button');
   private readonly restartButton = this.getElement('#restart-button');
@@ -161,10 +229,15 @@ export class Game {
   private readonly pauseRestartButton = this.getElement('#pause-restart-button');
   private readonly pauseMenuButton = this.getElement('#pause-menu-button');
   private readonly finishMenuButton = this.getElement('#finish-menu-button');
-  private readonly muteToggle = this.getElement('#mute-toggle');
+  /** One per settings panel — the start overlay and the pause overlay share the class. */
+  private readonly muteToggles = Array.from(
+    document.querySelectorAll<HTMLElement>('.mute-toggle'),
+  );
   private settings: GameSettings = loadSettings();
   private paused = false;
   private savedBestThisRace: number | null = null;
+  /** Built lazily by installDiagnostics() and reused for the whole session. */
+  private diagnostics: NonNullable<Window['__THREE_GAME_DIAGNOSTICS__']> | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.renderer = createRenderer(canvas);
@@ -190,11 +263,11 @@ export class Game {
     this.player1.setBoostFlashHandler(() => {
       this.hud.flashNitro();
       this.audio.whoosh();
-      this.cameraRig1.addTrauma(0.25);
+      this.addTrauma(this.cameraRig1, 0.25);
     });
     this.player2.setBoostFlashHandler(() => {
       this.audio.whoosh();
-      this.cameraRig2.addTrauma(0.22);
+      this.addTrauma(this.cameraRig2, 0.22);
     });
 
     this.createScene();
@@ -204,6 +277,11 @@ export class Game {
     this.resetRace(true);
     this.hud.showStart();
     this.hud.setMode('solo');
+    // Every other menu entry point goes through selectMode(), which hides these.
+    // Without this first-load call the PiP toggle (z-index 9, above the overlays
+    // at z-index 8) sat on top of the start panel while the pause button, at
+    // z-index 6, was correctly buried behind it.
+    this.setRaceControlsVisible(false);
     this.syncRenderMode();
     this.syncViewport();
     // Viewport work is event driven — never per frame.
@@ -240,7 +318,9 @@ export class Game {
       this.togglePause(false);
       this.returnToMenu();
     });
-    this.muteToggle.addEventListener('click', () => this.setMuted(!this.settings.muted));
+    this.muteToggles.forEach((el) => {
+      el.addEventListener('click', () => this.setMuted(!this.settings.muted));
+    });
     document.querySelectorAll('.diff-btn').forEach((el) => {
       el.addEventListener('click', () => {
         const d = (el as HTMLElement).dataset.diff as GameSettings['difficulty'];
@@ -248,12 +328,18 @@ export class Game {
       });
     });
     window.addEventListener('keydown', this.onGlobalKey);
+    this.motionQuery.addEventListener('change', this.onMotionPreferenceChange);
     this.applySettingsUi();
     this.refreshContinueButton();
 
+    this.installDiagnostics();
     this.installTestHooks();
-    this.publishDiagnostics();
   }
+
+  private readonly onMotionPreferenceChange = (event: MediaQueryListEvent) => {
+    this.reducedMotion = event.matches;
+    this.applyMotionPreference();
+  };
 
   private refreshContinueButton(): void {
     const save = loadRace();
@@ -427,8 +513,10 @@ export class Game {
   }
 
   private applySettingsUi(): void {
-    this.muteToggle.textContent = this.settings.muted ? '关' : '开';
-    this.muteToggle.classList.toggle('off', this.settings.muted);
+    for (const el of this.muteToggles) {
+      el.textContent = this.settings.muted ? '关' : '开';
+      el.classList.toggle('off', this.settings.muted);
+    }
     document.querySelectorAll('.diff-btn').forEach((el) => {
       el.classList.toggle('active', (el as HTMLElement).dataset.diff === this.settings.difficulty);
     });
@@ -567,9 +655,11 @@ export class Game {
     this.renderer.dispose();
     window.removeEventListener('keydown', this.onGlobalKey);
     window.removeEventListener('resize', this.onWindowResize);
+    this.motionQuery.removeEventListener('change', this.onMotionPreferenceChange);
     this.resizeObserver?.disconnect();
     window.__THREE_GAME_DIAGNOSTICS__ = undefined;
     window.__THREE_GAME_TEST_HOOKS__ = undefined;
+    this.diagnostics = null;
   }
 
   private selectMode(mode: DualMode): void {
@@ -628,7 +718,7 @@ export class Game {
     this.player1.setBoostFlashHandler(() => {
       this.hud.flashNitro();
       this.audio.whoosh();
-      this.cameraRig1.addTrauma(0.25);
+      this.addTrauma(this.cameraRig1, 0.25);
     });
     if (this.phase === 'menu') {
       this.player1.reset(this.track);
@@ -713,9 +803,13 @@ export class Game {
       return;
     }
 
+    // Reduced motion freezes every ambient animation. `animElapsed` is driven by
+    // the same clamped delta, so track/pad/box bobbing stops with it instead of
+    // continuing off the raw wall clock.
     const animDelta = this.reducedMotion ? 0 : delta;
+    this.animElapsed += animDelta;
 
-    this.track.update(animDelta, elapsed);
+    this.track.update(animDelta, this.animElapsed);
     this.input.readPlayer1(this.inputP1);
     this.input.readPlayer2(this.inputP2);
 
@@ -732,7 +826,7 @@ export class Game {
     const raceActive = this.phase === 'racing';
     // The race clock only runs while racing — countdown / pause / finish freeze it.
     if (raceActive) this.raceTime += delta;
-    this.items.update(animDelta, elapsed);
+    this.items.update(animDelta, this.animElapsed);
 
     this.updateHumanPlayer(this.player1, this.inputP1, delta, raceActive, 1);
     if (this.mode === 'duo') {
@@ -798,7 +892,7 @@ export class Game {
     if (p1.offTrack && p1.speed > 4 && this.phase === 'racing') {
       this.offTrackShakeTimer += delta;
       if (this.offTrackShakeTimer > 0.15) {
-        this.cameraRig1.addTrauma(0.08);
+        this.addTrauma(this.cameraRig1, 0.08);
         this.offTrackShakeTimer = 0;
       }
     } else {
@@ -809,6 +903,9 @@ export class Game {
     if (this.comboCount > 0) {
       this.comboTimer -= delta;
       if (this.comboTimer <= 0) this.comboCount = 0;
+    }
+    if (this.slipstreamToastCooldown > 0) {
+      this.slipstreamToastCooldown = Math.max(0, this.slipstreamToastCooldown - delta);
     }
 
     if (this.phase === 'racing' && this.checkFinish()) {
@@ -833,11 +930,13 @@ export class Game {
     // One-key return to track (R / touch)
     if (canControl && input.reset) {
       player.resetToTrack(this.track);
-      const pos = player.kart.state.position.clone();
-      pos.y = 0.3;
-      this.vfx.emitShockwave(pos, '#ffd166');
       this.audio.whoosh();
-      (which === 1 ? this.cameraRig1 : this.cameraRig2).addTrauma(0.3);
+      this.addTrauma(which === 1 ? this.cameraRig1 : this.cameraRig2, 0.3);
+      if (!this.reducedMotion) {
+        const pos = this.scratchOrigin.copy(player.kart.state.position);
+        pos.y = 0.3;
+        this.vfx.emitShockwave(pos, '#ffd166');
+      }
       if (which === 1) {
         this.hud.flashNitro();
         this.offTrackTimer = 0;
@@ -864,16 +963,18 @@ export class Game {
     const cam = which === 1 ? this.cameraRig1 : this.cameraRig2;
     if (result.boostPad || result.driftBoost > 0 || result.firedItem === 'turbo') {
       this.audio.whoosh();
-      cam.addTrauma(0.22 + (result.driftBoost ?? 0) * 0.06);
+      this.addTrauma(cam, 0.22 + (result.driftBoost ?? 0) * 0.06);
       this.emitBoostShock(player);
       if (which === 1) this.hud.flashNitro();
       this.flashScreen(result.driftBoost > 0 ? 'drift' : 'boost');
     }
     if (result.wallScrape) {
-      const pos = this.scratchOrigin.copy(player.kart.state.position);
-      pos.y = 0.2;
-      this.vfx.emitSparks(pos, 6, '#ffd166');
-      cam.addTrauma(0.06);
+      this.addTrauma(cam, 0.06);
+      if (!this.reducedMotion) {
+        const pos = this.scratchOrigin.copy(player.kart.state.position);
+        pos.y = 0.2;
+        this.vfx.emitSparks(pos, 6, '#ffd166');
+      }
     }
     if (result.driftBoost > 0) {
       this.registerCombo('drift');
@@ -897,8 +998,11 @@ export class Game {
           const dot = to.dot(forward);
           if (dot > 0.88) {
             player.applySlipstream(delta);
-            if (which === 1 && this.comboTimer <= 0) {
+            // This branch runs on every frame the draft window is open, so the
+            // toast needs its own cooldown — it used to append a chip per frame.
+            if (which === 1 && this.slipstreamToastCooldown <= 0) {
               this.hud.showCombo('尾流', 1);
+              this.slipstreamToastCooldown = SLIPSTREAM_TOAST_INTERVAL;
             }
             break;
           }
@@ -924,12 +1028,14 @@ export class Game {
     }
     if (this.items.checkMineHit(player.kart.state.position, 1.2)) {
       if (player.applyMineHit()) {
-        cam.addTrauma(0.55);
+        this.addTrauma(cam, 0.55);
         this.audio.whoosh();
-        const pos = player.kart.state.position.clone();
-        pos.y = 0.3;
-        this.vfx.emitSparks(pos, 20, '#ff6b6b');
         this.flashScreen('hit');
+        if (!this.reducedMotion) {
+          const pos = this.scratchOrigin.copy(player.kart.state.position);
+          pos.y = 0.3;
+          this.vfx.emitSparks(pos, 20, '#ff6b6b');
+        }
       }
     }
 
@@ -943,7 +1049,7 @@ export class Game {
     if (!player.kart.state.finished && player.kart.state.lap >= TOTAL_LAPS) {
       player.kart.state.finished = true;
       player.kart.state.finishTime = this.raceTime;
-      cam.addTrauma(0.3);
+      this.addTrauma(cam, 0.3);
       this.audio.countdownBeep(true);
     }
   }
@@ -961,6 +1067,9 @@ export class Game {
     if (this.finishShown) return;
     this.finishShown = true;
     this.phase = 'finished';
+    // The results panel replaces the race controls; leaving them up let the PiP
+    // toggle (z-index 9) float over the panel.
+    this.setRaceControlsVisible(false);
     clearRaceSave();
     this.refreshContinueButton();
     if (!this.player1.kart.state.finished) {
@@ -1008,15 +1117,19 @@ export class Game {
           : undefined,
     });
     // Finish fireworks
-    const fx = this.player1.kart.state.position.clone();
-    fx.y = 2;
-    this.vfx.emitFireworks(fx);
-    if (this.mode === 'duo') {
-      this.vfx.emitFireworks(this.player2.kart.state.position.clone().setY(2));
+    if (!this.reducedMotion) {
+      const fx = this.scratchOrigin.copy(this.player1.kart.state.position);
+      fx.y = 2;
+      this.vfx.emitFireworks(fx);
+      if (this.mode === 'duo') {
+        this.vfx.emitFireworks(
+          this.scratchTo.copy(this.player2.kart.state.position).setY(2),
+        );
+      }
     }
     this.audio.whoosh();
     this.audio.countdownBeep(true);
-    this.cameraRig1.addTrauma(0.4);
+    this.addTrauma(this.cameraRig1, 0.4);
   }
 
   private fireMissileFrom(shooter: PlayerRacer): void {
@@ -1067,8 +1180,17 @@ export class Game {
       hitAi.kart.state.speed *= 0.4;
       hitAi.kart.state.boostTimer = 0;
     }
-    this.cameraRig1.addTrauma(0.4);
+    this.addTrauma(this.cameraRig1, 0.4);
     this.audio.whoosh();
+  }
+
+  /**
+   * Camera shake is one of the things "reduce motion" is meant to switch off,
+   * so every trauma request goes through here rather than straight to the rig.
+   */
+  private addTrauma(rig: CameraRig, amount: number): void {
+    if (this.reducedMotion) return;
+    rig.addTrauma(amount);
   }
 
   /**
@@ -1118,6 +1240,12 @@ export class Game {
     this.kartRefs.length = 0;
     this.kartRefs.push({ kart: this.player1.kart }, { kart: this.player2.kart });
     for (const ai of this.ais) this.kartRefs.push({ kart: ai.kart });
+    this.applyMotionPreference();
+  }
+
+  /** Pushes the current motion preference down to every kart's decoration. */
+  private applyMotionPreference(): void {
+    for (const { kart } of this.kartRefs) kart.setReducedMotion(this.reducedMotion);
   }
 
   private render(): void {
@@ -1236,6 +1364,7 @@ export class Game {
     this.lastRank1 = 1;
     this.comboCount = 0;
     this.comboTimer = 0;
+    this.slipstreamToastCooldown = 0;
     this.player1.resetDriftScore();
     this.player2.resetDriftScore();
     this.items.build(this.track);
@@ -1300,7 +1429,7 @@ export class Game {
       this.hud.showBanner('冲线！', 'lap');
     }
     this.audio.countdownBeep(true);
-    this.cameraRig1.addTrauma(0.2);
+    this.addTrauma(this.cameraRig1, 0.2);
   }
 
   private trackProgressForKart(
@@ -1322,7 +1451,9 @@ export class Game {
   private rankOf(player: PlayerRacer): number {
     const s = player.kart.state;
     let better = 0;
-    const others: Array<{ finished: boolean; finishTime: number; totalProgress: number }> = [];
+    // Reused array: rankOf runs twice per frame from the HUD and the rank flash.
+    const others = this.rankScratch;
+    others.length = 0;
     if (this.mode === 'duo') {
       const other = player === this.player1 ? this.player2 : this.player1;
       others.push(other.kart.state);
@@ -1342,6 +1473,7 @@ export class Game {
   }
 
   private emitPlayerVfx(player: PlayerRacer): void {
+    if (this.reducedMotion) return;
     const state = player.kart.state;
     const origin = this.scratchOrigin.copy(state.position);
     origin.y = 0.15;
@@ -1371,6 +1503,7 @@ export class Game {
   }
 
   private emitBoostShock(player: PlayerRacer): void {
+    if (this.reducedMotion) return;
     const s = player.kart.state;
     const pos = this.scratchOrigin.copy(s.position);
     pos.y = 0.2;
@@ -1382,9 +1515,20 @@ export class Game {
     if (!this.speedLines) return;
     const ratio = THREE.MathUtils.clamp((speed - 18) / 50, 0, 1);
     const opacity = Math.max(ratio * 0.7, boosting ? 0.95 : 0);
-    this.speedLines.style.opacity = String(opacity);
-    this.speedLines.classList.toggle('boost', boosting);
-    this.speedLines.classList.toggle('drift', drifting);
+    // Style writes invalidate the element, so only touch the DOM when a value
+    // actually changed — this runs every frame.
+    if (opacity !== this.lastSpeedLineOpacity) {
+      this.speedLines.style.opacity = String(opacity);
+      this.lastSpeedLineOpacity = opacity;
+    }
+    if (boosting !== this.lastSpeedLinesBoost) {
+      this.speedLines.classList.toggle('boost', boosting);
+      this.lastSpeedLinesBoost = boosting;
+    }
+    if (drifting !== this.lastSpeedLinesDrift) {
+      this.speedLines.classList.toggle('drift', drifting);
+      this.lastSpeedLinesDrift = drifting;
+    }
     this.post.bloom.strength = boosting ? 0.38 : 0.18 + ratio * 0.08;
   }
 
@@ -1404,7 +1548,7 @@ export class Game {
     if (this.comboCount >= 3) {
       this.hud.showBanner(`${this.comboLabel} ×${this.comboCount} COMBO!`, 'boost');
       this.audio.whoosh();
-      this.cameraRig1.addTrauma(0.15);
+      this.addTrauma(this.cameraRig1, 0.15);
     }
   }
 
@@ -1415,12 +1559,16 @@ export class Game {
     } else {
       this.offTrackTimer = 0;
     }
-    this.offtrackHelp.classList.toggle('visible', this.offTrackTimer > 1.2);
+    const visible = this.offTrackTimer > 1.2;
+    if (visible !== this.lastOffTrackHelpVisible) {
+      this.offtrackHelp.classList.toggle('visible', visible);
+      this.lastOffTrackHelpVisible = visible;
+    }
   }
 
   private flashScreen(kind: 'boost' | 'drift' | 'hit'): void {
     const el = this.speedLines;
-    if (!el) return;
+    if (!el || this.reducedMotion) return;
     el.classList.remove('flash-boost', 'flash-drift', 'flash-hit');
     void el.offsetWidth;
     el.classList.add(
@@ -1449,57 +1597,75 @@ export class Game {
     }
 
     if (!this.minimapPath) {
-      this.minimapPath = this.track.samples
-        .filter((_, i) => i % 8 === 0)
-        .map((s) => ({ x: s.position.x, z: s.position.z }));
+      const path: Array<{ x: number; z: number }> = [];
+      for (let i = 0; i < this.track.samples.length; i += MINIMAP_STRIDE) {
+        const sample = this.track.samples[i];
+        path.push({ x: sample.position.x, z: sample.position.z });
+      }
+      this.minimapPath = path;
     }
 
-    const dots: MinimapDot[] = [
-      { x: p1.position.x, z: p1.position.z, color: '#2de2ff', isPlayer: true },
-    ];
+    // Dots are pooled and mutated in place — this runs on every frame.
+    const dots = this.hudDots;
+    dots.length = 0;
+    const first = this.dotPool[0];
+    first.x = p1.position.x;
+    first.z = p1.position.z;
+    first.color = '#2de2ff';
+    first.isPlayer = true;
+    dots.push(first);
+    let slot = 1;
+
     if (this.mode === 'duo') {
-      dots.push({ x: p2.position.x, z: p2.position.z, color: '#ffd166', isPlayer: true });
+      const second = this.dotPool[slot];
+      slot += 1;
+      second.x = p2.position.x;
+      second.z = p2.position.z;
+      second.color = '#ffd166';
+      second.isPlayer = true;
+      dots.push(second);
     }
-    const aiColors = ['#ff3cac', '#7cff6b'];
-    for (let i = 0; i < this.ais.length; i += 1) {
+    for (let i = 0; i < this.ais.length && slot < this.dotPool.length; i += 1) {
       if (!this.ais[i].kart.group.visible) continue;
-      dots.push({
-        x: this.ais[i].kart.state.position.x,
-        z: this.ais[i].kart.state.position.z,
-        color: aiColors[i] ?? '#ffffff',
-      });
+      const dot = this.dotPool[slot];
+      slot += 1;
+      dot.x = this.ais[i].kart.state.position.x;
+      dot.z = this.ais[i].kart.state.position.z;
+      dot.color = AI_MINIMAP_COLORS[i] ?? '#ffffff';
+      dot.isPlayer = false;
+      dots.push(dot);
     }
 
-    this.hud.update({
-      mode: this.mode,
-      rank: rank1,
-      rank2,
-      totalRacers: total,
-      lap: Math.min(Math.max(p1.lap, 0) + 1, TOTAL_LAPS),
-      lap2: Math.min(Math.max(p2.lap, 0) + 1, TOTAL_LAPS),
-      totalLaps: TOTAL_LAPS,
-      time: this.raceTime,
-      bestLap: this.bestLap,
-      speedKmh: p1.speed * 3.6,
-      speed2Kmh: p2.speed * 3.6,
-      nitro: p1.nitro,
-      nitro2: p2.nitro,
-      boosting: p1.isBoosting,
-      boosting2: p2.isBoosting,
-      drifting: p1.isDrifting,
-      status,
-      gear: gearOf(p1.speed, p1.isBoosting),
-      gear2: gearOf(p2.speed, p2.isBoosting),
-      driftChargeLevel: this.player1.getDriftChargeLevel(),
-      driftChargeLevel2: this.player2.getDriftChargeLevel(),
-      driftScore: this.player1.getDriftScore(),
-      item: this.player1.getItem(),
-      item2: this.player2.getItem(),
-      itemLabel: itemLabel(this.player1.getItem()),
-      itemLabel2: itemLabel(this.player2.getItem()),
-      trackPath: this.minimapPath,
-      dots,
-    });
+    const hud = this.hudState;
+    hud.mode = this.mode;
+    hud.rank = rank1;
+    hud.rank2 = rank2;
+    hud.totalRacers = total;
+    hud.lap = Math.min(Math.max(p1.lap, 0) + 1, TOTAL_LAPS);
+    hud.lap2 = Math.min(Math.max(p2.lap, 0) + 1, TOTAL_LAPS);
+    hud.totalLaps = TOTAL_LAPS;
+    hud.time = this.raceTime;
+    hud.bestLap = this.bestLap;
+    hud.speedKmh = p1.speed * 3.6;
+    hud.speed2Kmh = p2.speed * 3.6;
+    hud.nitro = p1.nitro;
+    hud.nitro2 = p2.nitro;
+    hud.boosting = p1.isBoosting;
+    hud.boosting2 = p2.isBoosting;
+    hud.drifting = p1.isDrifting;
+    hud.status = status;
+    hud.gear = gearOf(p1.speed, p1.isBoosting);
+    hud.gear2 = gearOf(p2.speed, p2.isBoosting);
+    hud.driftChargeLevel = this.player1.getDriftChargeLevel();
+    hud.driftChargeLevel2 = this.player2.getDriftChargeLevel();
+    hud.driftScore = this.player1.getDriftScore();
+    hud.item = this.player1.getItem();
+    hud.item2 = this.player2.getItem();
+    hud.itemLabel = itemLabel(this.player1.getItem());
+    hud.itemLabel2 = itemLabel(this.player2.getItem());
+    hud.trackPath = this.minimapPath;
+    hud.dots = dots;
+    this.hud.update(hud);
   }
 
   private installTestHooks(): void {
@@ -1638,11 +1804,52 @@ export class Game {
         this.publishDiagnostics();
         return { item: this.player1.getItem() };
       },
+      /**
+       * Parks P1 a few units behind the leading AI, aimed at it, so the
+       * slipstream window is open. Both the draft cone and the item boxes are
+       * position dependent, and driving there in a headless run is not
+       * reproducible, so the geometry is set up directly.
+       */
+      draftPlayer: () => {
+        let leader: AIRacer | null = null;
+        let leaderProgress = -1;
+        for (const ai of this.ais) {
+          if (!ai.kart.group.visible) continue;
+          if (ai.kart.state.totalProgress > leaderProgress) {
+            leaderProgress = ai.kart.state.totalProgress;
+            leader = ai;
+          }
+        }
+        if (!leader) return { drafted: false, distance: -1, dot: 0 };
+        const target = leader.kart.state;
+        const heading = target.heading;
+        const forward = this.scratchForward.set(Math.sin(heading), 0, Math.cos(heading));
+        const s = this.player1.kart.state;
+        s.position.copy(target.position).addScaledVector(forward, -7);
+        s.position.y = 0;
+        s.heading = heading;
+        s.speed = Math.min(target.speed + 6, 44);
+        s.isBoosting = false;
+        s.boostTimer = 0;
+        s.lateralSpeed = 0;
+        s.driftAngle = 0;
+        s.isDrifting = false;
+        s.progress = this.track.projectProgress(s.position, s.progress);
+        this.prevProgressP1 = s.progress;
+        this.player1.kart.syncTransform(0);
+        this.updateHud();
+        this.render();
+        this.publishDiagnostics();
+        const to = this.scratchTo.copy(target.position).sub(s.position);
+        const distance = to.length();
+        return { drafted: true, distance, dot: distance > 0 ? to.normalize().dot(forward) : 0 };
+      },
       setPausedForScreenshot: (paused: boolean) => {
         this.pausedForScreenshot = paused;
       },
       setReducedMotion: (enabled: boolean) => {
         this.reducedMotion = enabled;
+        this.applyMotionPreference();
         this.render();
         this.publishDiagnostics();
       },
@@ -1672,62 +1879,101 @@ export class Game {
     };
   }
 
-  private publishDiagnostics(): void {
-    const info = this.renderer.info;
-    const state = this.player1.kart.state;
-    window.__THREE_GAME_DIAGNOSTICS__ = {
-      frame: this.frame,
-      elapsed: this.elapsed,
-      raceTime: this.raceTime,
-      phase: this.phase,
-      mode: this.mode,
-      track: this.trackId,
-      lap: state.lap,
-      rank: this.rankOf(this.player1),
-      bestLap: this.bestLap,
-      complete: this.phase === 'finished',
-      player: {
-        position: {
-          x: state.position.x,
-          y: state.position.y,
-          z: state.position.z,
-        },
-        speed: state.speed,
-        heading: state.heading,
-        nitro: state.nitro,
-        progress: state.progress,
-        totalProgress: state.totalProgress,
-        drifting: state.isDrifting,
-        boosting: state.isBoosting,
-        offTrack: state.offTrack,
+  /**
+   * Diagnostics used to be rebuilt from scratch on every frame — a fresh tree
+   * of ~10 nested objects, purely so that test scripts could read a couple of
+   * numbers. Install it once with live getters instead: readers see the current
+   * values and the render loop allocates nothing.
+   */
+  private installDiagnostics(): void {
+    if (this.diagnostics && window.__THREE_GAME_DIAGNOSTICS__ === this.diagnostics) return;
+    const game = this;
+    this.diagnostics = {
+      get frame() {
+        return game.frame;
       },
-      player2:
-        this.mode === 'duo'
-          ? {
-              position: {
-                x: this.player2.kart.state.position.x,
-                y: this.player2.kart.state.position.y,
-                z: this.player2.kart.state.position.z,
-              },
-              speed: this.player2.kart.state.speed,
-              nitro: this.player2.kart.state.nitro,
-              progress: this.player2.kart.state.progress,
-            }
-          : undefined,
-      renderer: {
-        calls: info.render.calls,
-        triangles: info.render.triangles,
-        geometries: info.memory.geometries,
-        textures: info.memory.textures,
+      get elapsed() {
+        return game.elapsed;
       },
-      canvas: {
-        clientWidth: this.canvas.clientWidth,
-        clientHeight: this.canvas.clientHeight,
-        width: this.canvas.width,
-        height: this.canvas.height,
-        dpr: Math.min(window.devicePixelRatio || 1, this.tuning.maxDpr),
+      get raceTime() {
+        return game.raceTime;
+      },
+      get phase() {
+        return game.phase;
+      },
+      get mode() {
+        return game.mode;
+      },
+      get track() {
+        return game.trackId;
+      },
+      get lap() {
+        return game.player1.kart.state.lap;
+      },
+      get rank() {
+        return game.rankOf(game.player1);
+      },
+      get bestLap() {
+        return game.bestLap;
+      },
+      get complete() {
+        return game.phase === 'finished';
+      },
+      get reducedMotion() {
+        return game.reducedMotion;
+      },
+      get vfxLive() {
+        return game.vfx.live;
+      },
+      get player() {
+        const state = game.player1.kart.state;
+        return {
+          position: { x: state.position.x, y: state.position.y, z: state.position.z },
+          speed: state.speed,
+          heading: state.heading,
+          nitro: state.nitro,
+          progress: state.progress,
+          totalProgress: state.totalProgress,
+          drifting: state.isDrifting,
+          boosting: state.isBoosting,
+          offTrack: state.offTrack,
+        };
+      },
+      get player2() {
+        if (game.mode !== 'duo') return undefined;
+        const state = game.player2.kart.state;
+        return {
+          position: { x: state.position.x, y: state.position.y, z: state.position.z },
+          speed: state.speed,
+          nitro: state.nitro,
+          progress: state.progress,
+        };
+      },
+      get renderer() {
+        const info = game.renderer.info;
+        return {
+          calls: info.render.calls,
+          triangles: info.render.triangles,
+          geometries: info.memory.geometries,
+          textures: info.memory.textures,
+        };
+      },
+      get canvas() {
+        return {
+          clientWidth: game.canvas.clientWidth,
+          clientHeight: game.canvas.clientHeight,
+          width: game.canvas.width,
+          height: game.canvas.height,
+          dpr: Math.min(window.devicePixelRatio || 1, game.tuning.maxDpr),
+        };
       },
     };
+    window.__THREE_GAME_DIAGNOSTICS__ = this.diagnostics;
+  }
+
+  /** Cheap per-frame keep-alive: re-installs only if something cleared it. */
+  private publishDiagnostics(): void {
+    this.installDiagnostics();
   }
 
   private getElement(selector: string): HTMLElement {

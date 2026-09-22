@@ -11,6 +11,7 @@ declare global {
       forceRace?: () => { phase: string; mode: string };
       setState: (name: string) => { state: string };
       grantItem?: (type?: string) => { item: string | null };
+      draftPlayer?: () => { drafted: boolean; distance: number; dot: number };
       setPausedForScreenshot: (paused: boolean) => void;
       setReducedMotion: (enabled: boolean) => void;
       hideDebugUi: (hidden: boolean) => void;
@@ -27,6 +28,8 @@ declare global {
       rank?: number;
       bestLap?: number | null;
       complete?: boolean;
+      reducedMotion?: boolean;
+      vfxLive?: number;
       score?: number;
       targetScore?: number;
       player?: {
