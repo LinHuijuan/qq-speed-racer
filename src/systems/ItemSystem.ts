@@ -32,7 +32,15 @@ export class ItemSystem {
   private readonly rng: () => number;
   private readonly itemTypes: ItemType[] = ['turbo', 'turbo', 'missile', 'shield', 'mine'];
   private readonly boxMaterial: THREE.MeshStandardMaterial;
-  private readonly ringMaterial = new THREE.MeshBasicMaterial({ color: '#7cf6ff' });
+  /*
+   * #7cf6ff scores 0.825 on UnrealBloomPass's Rec.601 luma (0.299/0.587/0.114).
+   * That sat just under the old 0.85 threshold and so never bloomed; at the new
+   * 0.72 it cleared the bar and the 0.06-radius tube ballooned into a fat white
+   * band that hid whatever was behind it — including the player's kart driving
+   * through the box. A more saturated cyan scores 0.657, staying clearly a neon
+   * cyan target without clipping to white.
+   */
+  private readonly ringMaterial = new THREE.MeshBasicMaterial({ color: '#2fd4ff' });
   private readonly mineMaterial = new THREE.MeshStandardMaterial({
     color: '#ff4f7a',
     emissive: '#ff2a6d',

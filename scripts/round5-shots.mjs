@@ -112,6 +112,47 @@ async function diffShots(page, a, b) {
   );
 }
 
+/**
+ * Fraction of pixels in `box` that are bright *and* desaturated — the pale
+ * glare a blown-out additive/unlit mesh produces, which hides whatever is
+ * behind it.
+ *
+ * This is the measurement that caught the item-box rings. They were #7cf6ff,
+ * which scores 0.825 on UnrealBloomPass's Rec.601 luma (0.299/0.587/0.114):
+ * just under the old 0.85 threshold, but over the new 0.72, so the 0.06-radius
+ * tube ballooned into a fat white band around every item box on the track.
+ */
+async function glareStats(page, shot, box) {
+  return page.evaluate(
+    async ([b64, b]) => {
+      const img = await new Promise((res, rej) => {
+        const i = new Image();
+        i.onload = () => res(i);
+        i.onerror = rej;
+        i.src = `data:image/png;base64,${b64}`;
+      });
+      const c = document.createElement('canvas');
+      c.width = b.w;
+      c.height = b.h;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(img, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+      const d = g.getImageData(0, 0, b.w, b.h).data;
+      let glare = 0;
+      const n = b.w * b.h;
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i];
+        const gg = d[i + 1];
+        const bb = d[i + 2];
+        const mn = Math.min(r, gg, bb);
+        const mx = Math.max(r, gg, bb);
+        if (mn > 150 && mx - mn < 70) glare++;
+      }
+      return glare / n;
+    },
+    [shot.toString('base64'), box],
+  );
+}
+
 /* ---------------------------------------------------------------- desktop */
 
 {
@@ -361,7 +402,22 @@ async function diffShots(page, a, b) {
   await page.keyboard.down('w');
   await page.keyboard.down('ArrowUp');
   await page.waitForTimeout(1500);
-  await shoot(page, '09-race-duo');
+  const duoShot = await page.screenshot({ path: `${outDir}/09-race-duo.png` });
+  console.log(`  ${outDir}/09-race-duo.png`);
+
+  /*
+   * At this point in the run the kart is reliably passing through an item box
+   * (reproduced at x=-3.667 z=76.129 across runs), so this box frames the box's
+   * rings. Measured 9.71% glare with the old #7cf6ff rings and 2.32% after, so
+   * 5% sits between them with room on both sides.
+   */
+  const duoGlare = await glareStats(page, duoShot, { x: 380, y: 270, w: 520, h: 290 });
+  check(
+    'duo frame is not washed out by the item-box rings',
+    duoGlare < 0.05,
+    `glare ${(duoGlare * 100).toFixed(2)}% of the kart region`,
+  );
+
   await ctx.close();
 }
 

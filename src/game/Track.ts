@@ -1349,10 +1349,14 @@ export class Track {
     // Geometry and ring material are shared; only the pad glow material is
     // cloned because its emissiveIntensity pulses per pad.
     const ringGeometry = new THREE.RingGeometry(2.3, 2.7, 28);
+    // Same reasoning as the item-box rings: #7cf6ff scores 0.825 on
+    // UnrealBloomPass's Rec.601 luma, which clears the 0.72 threshold and blows
+    // the ring out to white. The pad surface still carries its own emissive
+    // glow, so the ring only has to read as a cyan outline.
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: '#7cf6ff',
+      color: '#2fd4ff',
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.85,
       side: THREE.DoubleSide,
     });
 
