@@ -446,6 +446,27 @@ async function glareStats(page, shot, box) {
   check('phone map fits inside its card', panel.mapInside, `map=${panel.mapW} card=${panel.cardW}`);
   check('phone cards are one per row', !panel.cols.includes(' '), panel.cols);
 
+  /*
+   * The phone panel scrolls by design — four full-width track cards plus a 2x2
+   * car grid cannot fit a 390x844 screen — so `ctaFits` is the wrong assertion
+   * here, and the desktop one above would be vacuous if copied. What must not
+   * happen is the distance growing: anything that makes the menu taller pushes
+   * 开始比赛 further from the thumb on the most common device. Budget, not
+   * target; the measured value is printed either way.
+   */
+  const phoneScroll = await page.evaluate(() => {
+    const p = document.querySelector('#overlay-start .panel');
+    const btn = document.querySelector('#start-button');
+    return Math.round(
+      btn.getBoundingClientRect().bottom - p.getBoundingClientRect().bottom,
+    );
+  });
+  check(
+    'phone menu does not push the CTA further away',
+    phoneScroll <= 300,
+    `CTA sits ${phoneScroll}px below the panel edge (panel scrolls ${panel.over ? 'yes' : 'no'})`,
+  );
+
   await page.evaluate(() => {
     window.__THREE_GAME_TEST_HOOKS__.setState('active-play');
     window.__THREE_GAME_TEST_HOOKS__.grantItem('turbo');

@@ -182,6 +182,13 @@
               </div>
             </label>
           </div>
+          <button id="start-button" type="button">开始比赛</button>
+          <button id="continue-button" type="button" class="secondary-btn" style="display:none">继续上次比赛</button>
+          <!-- The controls reference sits after the primary action, not before
+               it. On desktop the list used to push 开始比赛 to within 1px of the
+               fold with the panel still scrolling 50px; on a phone it is a
+               reference nobody reads before their first race anyway. The
+               landscape layout already reads this way, so the DOM now matches. -->
           <ul class="controls-list">
             <li class="hint-keyboard"><strong>P1</strong> WASD 转向油门 · Shift 漂移 · 空格 氮气 · E 道具 · <kbd>R</kbd> 回赛道</li>
             <li class="hint-keyboard duo-only"><strong>P2</strong> 方向键 · 右Shift 漂移 · 小键盘0 氮气 · / 道具 · \ 回赛道</li>
@@ -191,8 +198,6 @@
                  steer and -y to throttle (InputController.updatePointer). -->
             <li class="hint-touch"><strong>P1</strong> 左摇杆 转向油门 · 「漂移」蓄能 · 「氮气」爆发 · 「道具」使用 · 「回道」脱困</li>
           </ul>
-          <button id="start-button" type="button">开始比赛</button>
-          <button id="continue-button" type="button" class="secondary-btn" style="display:none">继续上次比赛</button>
           <p class="hint">双人模式为左右分屏 · 手机端可虚拟摇杆</p>
         </div>
       </div>
