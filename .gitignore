@@ -1,5 +1,7 @@
 ﻿node_modules/
-dist/
+# Matches the default `dist/` as well as the ad-hoc `dist-<label>/` directories
+# used when the default output cannot be cleaned (see scripts/ notes).
+dist*/
 artifacts/
 assets-textured/
 *.log

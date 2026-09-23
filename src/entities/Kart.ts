@@ -397,7 +397,7 @@ export class Kart {
 
   private createBody(geometries: BodyGeometries): THREE.Group {
     const group = new THREE.Group();
-    const livery = loadGameTexture(this.config.livery ?? '/assets/kart-livery.png', {
+    const livery = loadGameTexture(this.config.livery ?? '/assets/kart-livery.webp', {
       repeat: [1, 1],
     });
 
@@ -428,7 +428,7 @@ export class Kart {
         color: '#151a24',
         roughness: 0.4,
         metalness: 0.5,
-        map: loadGameTexture(this.config.livery ?? '/assets/kart-livery.png', {
+        map: loadGameTexture(this.config.livery ?? '/assets/kart-livery.webp', {
           repeat: [0.5, 0.5],
         }),
       }),

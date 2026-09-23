@@ -14,7 +14,7 @@ export const CAR_STYLES: CarStyle[] = [
     desc: '均衡 · 经典蓝',
     color: '#2a6cff',
     accent: '#2de2ff',
-    livery: '/assets/kart-livery.png',
+    livery: '/assets/kart-livery.webp',
   },
   {
     id: 'crimson',
@@ -22,7 +22,7 @@ export const CAR_STYLES: CarStyle[] = [
     desc: '进攻 · 热血红',
     color: '#c62828',
     accent: '#ff6b6b',
-    livery: '/assets/kart-livery-red.png',
+    livery: '/assets/kart-livery-red.webp',
   },
   {
     id: 'gold',
@@ -30,7 +30,7 @@ export const CAR_STYLES: CarStyle[] = [
     desc: '尊贵 · 黑金',
     color: '#b8860b',
     accent: '#ffd166',
-    livery: '/assets/kart-livery-gold.png',
+    livery: '/assets/kart-livery-gold.webp',
   },
   {
     id: 'violet',
@@ -38,7 +38,7 @@ export const CAR_STYLES: CarStyle[] = [
     desc: '赛博 · 紫电',
     color: '#6a1b9a',
     accent: '#e040fb',
-    livery: '/assets/kart-livery-purple.png',
+    livery: '/assets/kart-livery-purple.webp',
   },
 ];
 

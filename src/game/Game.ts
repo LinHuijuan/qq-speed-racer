@@ -1259,7 +1259,7 @@ export class Game {
 
   private createScene(): void {
     // City skyline backdrop cylinder (generated panorama) — tall & close so it reads in-frame
-    const skyTex = loadGameTexture('/assets/sky-city.png', { repeat: [3, 1] });
+    const skyTex = loadGameTexture('/assets/sky-city.webp', { repeat: [3, 1] });
     const skyCyl = new THREE.Mesh(
       new THREE.CylinderGeometry(160, 160, 120, 64, 1, true),
       new THREE.MeshBasicMaterial({

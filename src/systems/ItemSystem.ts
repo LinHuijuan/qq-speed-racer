@@ -50,7 +50,7 @@ export class ItemSystem {
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
 
-    const itemTex = loadGameTexture('/assets/item-box.png', { repeat: [1, 1] });
+    const itemTex = loadGameTexture('/assets/item-box.webp', { repeat: [1, 1] });
     this.boxMaterial = new THREE.MeshStandardMaterial({
       color: '#ffffff',
       map: itemTex,

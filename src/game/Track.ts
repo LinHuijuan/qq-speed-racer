@@ -255,7 +255,7 @@ export class Track {
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
 
-    const roadTexture = loadGameTexture('/assets/road-lanes.png', {
+    const roadTexture = loadGameTexture('/assets/road-lanes.webp', {
       repeat: [1, Math.max(10, Math.floor(this.length / 14))],
     });
     const roughnessMap = this.createRoadRoughnessTexture();
@@ -629,7 +629,7 @@ export class Track {
     geo.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({
       color: '#3a4250',
-      map: loadGameTexture('/assets/runoff.png', { repeat: [2, 40] }),
+      map: loadGameTexture('/assets/runoff.webp', { repeat: [2, 40] }),
       roughness: 0.92,
       metalness: 0.02,
       side: THREE.DoubleSide,
@@ -644,7 +644,7 @@ export class Track {
       new THREE.PlaneGeometry(460, 460),
       new THREE.MeshStandardMaterial({
         color: '#3a4258',
-        map: loadGameTexture('/assets/ground-night.png', { repeat: [40, 40] }),
+        map: loadGameTexture('/assets/ground-night.webp', { repeat: [40, 40] }),
         roughness: 1,
         metalness: 0,
       }),
@@ -673,7 +673,7 @@ export class Track {
     })();
 
     const buildingGeo = new THREE.BoxGeometry(1, 1, 1);
-    const facadeTex = loadGameTexture('/assets/building-facade.png', { repeat: [1, 1] });
+    const facadeTex = loadGameTexture('/assets/building-facade.webp', { repeat: [1, 1] });
     const buildingMat = new THREE.MeshStandardMaterial({
       color: '#8a92a8',
       map: facadeTex,
@@ -759,7 +759,7 @@ export class Track {
     this.group.add(strips);
 
     // Neon billboards near the track — textured posters
-    const bbTex = loadGameTexture('/assets/billboard-neon.png', { repeat: [1, 1] });
+    const bbTex = loadGameTexture('/assets/billboard-neon.webp', { repeat: [1, 1] });
     const billboardColors = ['#2de2ff', '#ff3cac', '#ffd166', '#7cff6b', '#9b6bff'];
     for (let i = 0; i < 10; i += 1) {
       const sample = this.samples[Math.floor((i / 10) * SAMPLE_COUNT)];
@@ -849,32 +849,32 @@ export class Track {
 
     const steel = new THREE.MeshStandardMaterial({
       color: '#5a6478',
-      map: loadGameTexture('/assets/metal-rail.png', { repeat: [2, 2] }),
+      map: loadGameTexture('/assets/metal-rail.webp', { repeat: [2, 2] }),
       roughness: 0.45,
       metalness: 0.65,
     });
     const concrete = new THREE.MeshStandardMaterial({
       color: '#8a92a4',
-      map: loadGameTexture('/assets/concrete-wall.png', { repeat: [2, 1] }),
+      map: loadGameTexture('/assets/concrete-wall.webp', { repeat: [2, 1] }),
       roughness: 0.88,
       metalness: 0.04,
     });
     const seatMat = new THREE.MeshStandardMaterial({
       color: '#6a8ccc',
-      map: loadGameTexture('/assets/grandstand.png', { repeat: [3, 1] }),
+      map: loadGameTexture('/assets/grandstand.webp', { repeat: [3, 1] }),
       roughness: 0.65,
       metalness: 0.1,
     });
     const tireMats = [
       new THREE.MeshStandardMaterial({
         color: '#2a2e38',
-        map: loadGameTexture('/assets/metal-rail.png', { repeat: [0.5, 0.5] }),
+        map: loadGameTexture('/assets/metal-rail.webp', { repeat: [0.5, 0.5] }),
         roughness: 0.9,
       }),
       new THREE.MeshStandardMaterial({ color: '#c23a3a', roughness: 0.8 }),
       new THREE.MeshStandardMaterial({
         color: '#c8cdd8',
-        map: loadGameTexture('/assets/concrete-wall.png', { repeat: [0.3, 0.3] }),
+        map: loadGameTexture('/assets/concrete-wall.webp', { repeat: [0.3, 0.3] }),
         roughness: 0.75,
       }),
     ];
@@ -884,7 +884,7 @@ export class Track {
     const railGeo = new THREE.BoxGeometry(0.08, 0.08, 2.8);
     const barMat = new THREE.MeshStandardMaterial({
       color: '#8a94a8',
-      map: loadGameTexture('/assets/metal-rail.png', { repeat: [1, 1] }),
+      map: loadGameTexture('/assets/metal-rail.webp', { repeat: [1, 1] }),
       roughness: 0.35,
       metalness: 0.8,
     });
@@ -1245,28 +1245,28 @@ export class Track {
     pit.rotation.y = Math.atan2(pitSample.tangent.x, pitSample.tangent.z);
     const garageMat = new THREE.MeshStandardMaterial({
       color: '#8a94b0',
-      map: loadGameTexture('/assets/pit-garage.png', { repeat: [1, 1] }),
+      map: loadGameTexture('/assets/pit-garage.webp', { repeat: [1, 1] }),
       roughness: 0.55,
       metalness: 0.35,
     });
     const doorMats = [
       new THREE.MeshStandardMaterial({
         color: '#6a9ccc',
-        map: loadGameTexture('/assets/pit-garage.png', { repeat: [1, 1] }),
+        map: loadGameTexture('/assets/pit-garage.webp', { repeat: [1, 1] }),
         emissive: '#2de2ff',
         emissiveIntensity: 0.4,
         roughness: 0.4,
       }),
       new THREE.MeshStandardMaterial({
         color: '#c06a9a',
-        map: loadGameTexture('/assets/pit-garage.png', { repeat: [1, 1] }),
+        map: loadGameTexture('/assets/pit-garage.webp', { repeat: [1, 1] }),
         emissive: '#ff3cac',
         emissiveIntensity: 0.35,
         roughness: 0.4,
       }),
       new THREE.MeshStandardMaterial({
         color: '#c0a060',
-        map: loadGameTexture('/assets/pit-garage.png', { repeat: [1, 1] }),
+        map: loadGameTexture('/assets/pit-garage.webp', { repeat: [1, 1] }),
         emissive: '#ffd166',
         emissiveIntensity: 0.3,
         roughness: 0.4,
@@ -1333,7 +1333,7 @@ export class Track {
 
   private buildBoostPads(): BoostPad[] {
     const padTs = this.layout.boostTs ?? [0.08, 0.22, 0.41, 0.58, 0.77];
-    const padTex = loadGameTexture('/assets/boost-pad.png', { repeat: [1, 1] });
+    const padTex = loadGameTexture('/assets/boost-pad.webp', { repeat: [1, 1] });
     const geometry = new THREE.CylinderGeometry(2.1, 2.1, 0.16, 24);
     const material = new THREE.MeshStandardMaterial({
       color: '#ffffff',
@@ -1379,7 +1379,7 @@ export class Track {
   private buildStartLine(): THREE.Group {
     const group = new THREE.Group();
     const sample = this.sampleAt(0);
-    const checkerTex = loadGameTexture('/assets/start-checker.png', { repeat: [1, 1] });
+    const checkerTex = loadGameTexture('/assets/start-checker.webp', { repeat: [1, 1] });
     const geometry = new THREE.PlaneGeometry(ROAD_HALF_WIDTH * 2, 2.8);
     const material = new THREE.MeshBasicMaterial({
       map: checkerTex,
