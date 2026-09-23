@@ -143,8 +143,16 @@ export class Hud {
   }
 
   setTrackBest(seconds: number | null): void {
-    // Reuse best-value chip on start overlay as historical best when not racing
-    if (seconds != null) this.bestValue.textContent = formatTime(seconds);
+    // Reuse best-value chip on start overlay as historical best when not racing.
+    //
+    // `null` means "this track has no record yet", and it has to clear the chip.
+    // Writing nothing left the previous track's time on screen: race 霓虹环城
+    // (best 01:12.34), pick a track you have never finished, and the chip still
+    // read 01:12.34 — a record for a different circuit. `update()` would not
+    // correct it either, because its own `last.best` cache is already
+    // '--:--.--' when no lap has completed, so it skips the write.
+    this.bestValue.textContent = seconds == null ? '--:--.--' : formatTime(seconds);
+    this.last.best = this.bestValue.textContent;
   }
 
   showBanner(text: string, kind: 'lap' | 'rank' | 'boost' = 'boost'): void {
@@ -262,10 +270,22 @@ export class Hud {
       this.timerValue.textContent = timeText;
     }
 
-    const bestText = state.bestLap == null ? '--:--.--' : formatTime(state.bestLap);
-    if (bestText !== last.best) {
-      last.best = bestText;
-      this.bestValue.textContent = bestText;
+    /*
+     * Only write the race's own best lap once there is one.
+     *
+     * This chip does double duty: `setTrackBest()` fills it from the menu with
+     * the track's stored record, and this writes the current race's best lap
+     * once the first lap lands. Writing '--:--.--' on every pre-lap frame would
+     * erase the record the moment it was shown — and would do it even more
+     * thoroughly once `setTrackBest` keeps `last.best` in sync, because then the
+     * cache no longer happens to suppress the write.
+     */
+    if (state.bestLap != null) {
+      const bestText = formatTime(state.bestLap);
+      if (bestText !== last.best) {
+        last.best = bestText;
+        this.bestValue.textContent = bestText;
+      }
     }
 
     const speedText = String(Math.round(state.speedKmh));

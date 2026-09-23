@@ -45,7 +45,14 @@ export function loadBests(): TrackBests {
   try {
     const raw = localStorage.getItem(BESTS_KEY);
     if (!raw) return {};
-    return JSON.parse(raw) as TrackBests;
+    const parsed: unknown = JSON.parse(raw);
+    // `as TrackBests` alone was a lie the two callers then acted on: a stored
+    // `null` (or a number, or a string) parsed fine and came back typed as a
+    // record, so `getBest()` threw on `null[id]` and `saveBest()` threw on
+    // `null[id] = time` — both outside this try, both taking the whole race
+    // down. Only an object can hold track ids.
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed as TrackBests;
   } catch {
     return {};
   }

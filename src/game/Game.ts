@@ -786,6 +786,24 @@ export class Game {
       btn.addEventListener('click', () => this.selectTrack(layout.id));
       host.appendChild(btn);
     }
+    this.revealTrackCard(this.trackId);
+  }
+
+  /**
+   * On a portrait phone the picker is a sideways-scrolling row (see the
+   * `(pointer: coarse) and (orientation: portrait)` block in styles.css), so a
+   * track selected by anything other than a tap on its own card — restoring the
+   * saved track on load, or resuming a saved race — would otherwise be selected
+   * off-screen with no sign that anything happened.
+   *
+   * `block: 'nearest'` keeps this from scrolling the panel: the row is already
+   * inside the viewport, so only the picker itself moves. No `behavior`, so it
+   * lands instantly and a geometry probe can measure it in the same tick.
+   */
+  private revealTrackCard(id: string): void {
+    document
+      .querySelector<HTMLElement>(`.track-btn[data-track-id="${id}"]`)
+      ?.scrollIntoView({ block: 'nearest', inline: 'center' });
   }
 
   private selectTrack(id: TrackLayoutId): void {
@@ -802,6 +820,7 @@ export class Game {
     document.querySelectorAll('.track-btn').forEach((el) => {
       el.classList.toggle('active', (el as HTMLElement).dataset.trackId === id);
     });
+    this.revealTrackCard(id);
     this.finishShown = false;
     this.resetRace(true);
     this.hud.showStart();
