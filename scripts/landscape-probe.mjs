@@ -31,7 +31,10 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'],
 });
 
-const mobile = width < 900;
+// Width is a proxy for "is a touch device", and it is wrong for a narrow
+// *desktop* window — which matches the stylesheet's `max-width: 820px` half but
+// has a mouse. TOUCH=0 forces a fine pointer so that case can be measured.
+const mobile = process.env.TOUCH ? process.env.TOUCH !== '0' : width < 900;
 // ZOOM=3 rasterises the page at 3x so `clip` screenshots come back magnified —
 // the only way to eyeball sub-pixel detail without an image library.
 const zoom = Number(process.env.ZOOM ?? 1);
@@ -90,11 +93,26 @@ const PROBE = () =>
     const panel = document.querySelector('#overlay-start .panel');
     const pr = panel.getBoundingClientRect();
     const br = btn.getBoundingClientRect();
+    // The CTA is not the only thing that matters. A panel that scrolls is fine
+    // as long as what falls off the bottom is reference material — but on a
+    // portrait phone the last child is the mode hint, which is where the
+    // "duo needs a keyboard" warning lives. Report it separately so "the CTA
+    // fits" cannot hide a truncated warning line.
+    const kids = [...panel.children];
+    const lastEl = kids[kids.length - 1];
+    const lr = lastEl.getBoundingClientRect();
     return {
       cta: {
         fits: br.bottom <= pr.bottom + 0.5,
         slack: Math.round(pr.bottom - br.bottom),
         h: Math.round(br.height),
+      },
+      lastChild: {
+        cls: lastEl.className || lastEl.tagName.toLowerCase(),
+        h: Math.round(lr.height),
+        bottom: Math.round(lr.bottom),
+        visible: lr.bottom <= pr.bottom + 0.5,
+        cut: Math.round(lr.bottom - pr.bottom),
       },
       continueShown: cont ? getComputedStyle(cont).display !== 'none' : null,
     };
@@ -137,7 +155,30 @@ async function measureAll() {
   const finishDump = await page.evaluate(DUMP, '#overlay-finish .panel');
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__.setState('menu'));
   await page.waitForTimeout(300);
-  return { overlays: [start, finish, pause], startDump, finishDump };
+
+  // The start panel's height depends on the mode: on a touch layout duo mode
+  // reveals `.mode-note` under the mode buttons (the "needs a keyboard"
+  // warning), which is ~30px the solo layout does not pay. Measuring only solo
+  // would report a CTA that fits and miss the state a player actually reaches.
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__.setMode('duo'));
+  await page.waitForTimeout(300);
+  const startDuo = await page.evaluate(MEASURE, ['#overlay-start', '#start-button']);
+  const modeNote = await page.evaluate(() => {
+    const el = document.querySelector('#overlay-start .mode-note');
+    if (!el) return { missing: true };
+    const cs = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    const p = document.querySelector('#overlay-start .panel').getBoundingClientRect();
+    return {
+      display: cs.display,
+      h: Math.round(r.height),
+      visible: r.bottom <= p.bottom + 0.5,
+    };
+  });
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__.setMode('solo'));
+  await page.waitForTimeout(300);
+
+  return { overlays: [start, finish, pause], startDump, finishDump, startDuo, modeNote };
 }
 
 function reportPanel(dump) {
@@ -158,10 +199,15 @@ function reportPanel(dump) {
   }
 }
 
-function report(tag, { overlays, startDump, finishDump }, probe) {
+function report(tag, { overlays, startDump, finishDump, startDuo, modeNote }, probe) {
   console.log(`\n--- ${tag} ---`);
   console.log(
     `start CTA fits=${probe.cta.fits} slack=${probe.cta.slack}px  continue shown=${probe.continueShown}`,
+  );
+  console.log(
+    `  last child p.${probe.lastChild.cls} h=${probe.lastChild.h}px ` +
+      `bottom=${probe.lastChild.bottom}px visible=${probe.lastChild.visible}` +
+      (probe.lastChild.visible ? '' : ` (cut by ${probe.lastChild.cut}px)`),
   );
   console.log(`  overlay CTAs (viewport ${height}px tall):`);
   for (const o of overlays) {
@@ -173,6 +219,17 @@ function report(tag, { overlays, startDump, finishDump }, probe) {
       `    ${o.sel.padEnd(17)} panel ${String(o.h).padStart(4)}px scroll ${String(o.scroll).padStart(4)}px  ` +
         `CTA ${o.ctaFits ? 'visible' : 'BURIED '} slack=${String(o.slack).padStart(5)}px ` +
         `bottom=${o.ctaBottom}px over=${o.over}px`,
+    );
+  }
+  if (startDuo && !startDuo.missing) {
+    console.log(
+      `  duo mode: panel ${startDuo.h}px scroll ${startDuo.scroll}px  ` +
+        `CTA ${startDuo.ctaFits ? 'visible' : 'BURIED '} slack=${startDuo.slack}px`,
+    );
+  }
+  if (modeNote && !modeNote.missing) {
+    console.log(
+      `  .mode-note display=${modeNote.display} h=${modeNote.h}px visible=${modeNote.visible}`,
     );
   }
   console.log('  start panel:');

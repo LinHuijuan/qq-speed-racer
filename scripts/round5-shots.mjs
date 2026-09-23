@@ -431,41 +431,100 @@ async function glareStats(page, shot, box) {
     const el = document.querySelector('#overlay-start .panel');
     const card = document.querySelector('.track-btn');
     const map = document.querySelector('.track-map');
+    const picker = document.querySelector('#track-picker');
     const r = card.getBoundingClientRect();
     const m = map.getBoundingClientRect();
+    const pr = picker.getBoundingClientRect();
+    const cards = [...document.querySelectorAll('.track-btn')].map((b) =>
+      Math.round(b.getBoundingClientRect().width),
+    );
     return {
       over: el.scrollWidth - el.clientWidth,
       cardH: Math.round(r.height),
       cardW: Math.round(r.width),
       mapW: Math.round(m.width),
       mapInside: m.right <= r.right + 0.5 && m.left >= r.left - 0.5,
-      cols: getComputedStyle(document.querySelector('.track-picker')).gridTemplateColumns,
+      /*
+       * The picker is a sideways-scrolling flex row now, so `gridTemplateColumns`
+       * is the wrong thing to read — it held whatever the last grid declaration
+       * left behind and kept passing. Assert the mechanics of the carousel
+       * instead: the row must overflow (so there is something to scroll), must
+       * not overflow vertically (or it would clip the cards), and must leave the
+       * next card peeking, which is the only affordance telling a thumb that the
+       * row moves.
+       */
+      display: getComputedStyle(picker).display,
+      scrollX: picker.scrollWidth - picker.clientWidth,
+      scrollY: picker.scrollHeight - picker.clientHeight,
+      pickerH: Math.round(pr.height),
+      cards,
+      peek: Math.round(picker.clientWidth - cards[0] - 10),
     };
   });
   check('phone panel has no horizontal overflow', panel.over <= 1, `+${panel.over}px`);
   check('phone map fits inside its card', panel.mapInside, `map=${panel.mapW} card=${panel.cardW}`);
-  check('phone cards are one per row', !panel.cols.includes(' '), panel.cols);
+  check(
+    'phone track row scrolls sideways',
+    panel.display === 'flex' && panel.scrollX > 0 && panel.scrollY <= 1,
+    `display=${panel.display} scrollX=${panel.scrollX}px scrollY=${panel.scrollY}px`,
+  );
+  check(
+    'phone track row leaves the next card peeking',
+    panel.peek > 20 && panel.peek < panel.cards[0],
+    `peek=${panel.peek}px of a ${panel.cards[0]}px card (row ${panel.pickerH}px tall)`,
+  );
 
   /*
-   * The phone panel scrolls by design — four full-width track cards plus a 2x2
-   * car grid cannot fit a 390x844 screen — so `ctaFits` is the wrong assertion
-   * here, and the desktop one above would be vacuous if copied. What must not
-   * happen is the distance growing: anything that makes the menu taller pushes
-   * 开始比赛 further from the thumb on the most common device. Budget, not
-   * target; the measured value is printed either way.
+   * This used to be a budget assertion, because four full-width track cards put
+   * 开始比赛 150px below the fold and `ctaFits` would have been permanently red.
+   * The cards are a carousel now, the whole menu fits, and the real assertion is
+   * finally worth making: if it ever goes red again, something made the panel
+   * taller than the screen.
    */
-  const phoneScroll = await page.evaluate(() => {
+  const phoneCta = await page.evaluate(() => {
     const p = document.querySelector('#overlay-start .panel');
     const btn = document.querySelector('#start-button');
-    return Math.round(
-      btn.getBoundingClientRect().bottom - p.getBoundingClientRect().bottom,
-    );
+    const pr = p.getBoundingClientRect();
+    const br = btn.getBoundingClientRect();
+    return {
+      fits: br.bottom <= pr.bottom + 0.5,
+      slack: Math.round(pr.bottom - br.bottom),
+      panelScroll: p.scrollHeight - p.clientHeight,
+    };
   });
   check(
-    'phone menu does not push the CTA further away',
-    phoneScroll <= 300,
-    `CTA sits ${phoneScroll}px below the panel edge (panel scrolls ${panel.over ? 'yes' : 'no'})`,
+    'phone CTA is above the fold',
+    phoneCta.fits,
+    `slack=${phoneCta.slack}px panelScroll=${phoneCta.panelScroll}px`,
   );
+
+  /*
+   * Duo mode on a touch device hides #touch-controls and P2 has no touch
+   * binding, so the split screen is inert for both players. The menu has to say
+   * so next to the button that causes it — and on a 360x740 phone the last line
+   * of the panel is off screen, which is why this lives under the mode buttons
+   * rather than in the footer hint.
+   */
+  const duoNote = await page.evaluate(() => {
+    const note = document.querySelector('#overlay-start .mode-note');
+    const solo = note && getComputedStyle(note).display === 'none';
+    document.querySelector('#mode-duo').click();
+    return {
+      hiddenInSolo: !!solo,
+      shownInDuo: !!note && getComputedStyle(note).display !== 'none',
+      text: note ? note.textContent.trim() : null,
+      visible:
+        !!note && note.getBoundingClientRect().bottom <=
+          document.querySelector('#overlay-start .panel').getBoundingClientRect().bottom + 0.5,
+    };
+  });
+  await shoot(page, '10b-menu-phone-duo');
+  check(
+    'phone duo mode says a keyboard is required',
+    duoNote.hiddenInSolo && duoNote.shownInDuo && duoNote.visible && /键盘/.test(duoNote.text ?? ''),
+    `solo=hidden:${duoNote.hiddenInSolo} duo=shown:${duoNote.shownInDuo} visible=${duoNote.visible} "${duoNote.text}"`,
+  );
+  await page.evaluate(() => document.querySelector('#mode-solo').click());
 
   await page.evaluate(() => {
     window.__THREE_GAME_TEST_HOOKS__.setState('active-play');

@@ -201,6 +201,29 @@ const posOk = await page.evaluate(() => {
 });
 ok('finite-pos', !!posOk);
 
+// 11) The best-time chip must follow the track, not stick to the last one.
+//
+// The chip doubles as the track's historical best (setTrackBest, written from
+// the menu) and the current race's best lap (update, written once a lap lands).
+// getBest() returns null for a track you have never finished, and that null
+// used to be a no-op — so racing 霓虹环城 (best 01:13.50) and then picking 港口
+// left 01:13.50 on screen, a record for a different circuit. The chip is the
+// only place the record is shown before a race starts, so it has to clear.
+await page.evaluate(() => {
+  localStorage.setItem('neon-rush-bests', JSON.stringify({ neon: 73.5 }));
+});
+await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setTrack?.('neon'));
+await page.waitForTimeout(250);
+const bestNeon = (await page.locator('#best-value').textContent())?.trim();
+await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setTrack?.('harbor'));
+await page.waitForTimeout(250);
+const bestHarbor = (await page.locator('#best-value').textContent())?.trim();
+ok(
+  'track-best-follows-track',
+  bestNeon === '01:13.50' && bestHarbor === '--:--.--',
+  { bestNeon, bestHarbor },
+);
+
 await page.screenshot({ path: path.join(outDir, 'final.png'), fullPage: true });
 
 const report = {
