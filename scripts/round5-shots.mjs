@@ -58,6 +58,60 @@ const check = (name, pass, detail = '') => {
   console.log(`  ${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? `  ${detail}` : ''}`);
 };
 
+/**
+ * Prove a decoration actually paints.
+ *
+ * `getComputedStyle(el, '::before').maskImage` returning a non-empty string says
+ * nothing about whether one pixel reaches the screen. The round-5 tick bezel
+ * passed exactly that assertion while its mask annulus sat entirely outside the
+ * element box, so the ticks never rendered. An assertion that cannot fail is
+ * worse than no assertion, so this paints the region twice — once with the
+ * decoration killed — and diffs the pixels.
+ *
+ * The canvas and the speed-line overlay are hidden for every capture so the ring
+ * sits on a flat backdrop and consecutive shots differ only by the decoration.
+ * The PNGs are handed back to the page as data URLs and read through a 2D
+ * canvas, so no image-decoding dependency is needed.
+ */
+async function diffShots(page, a, b) {
+  return page.evaluate(
+    async ([b64a, b64b]) => {
+      const load = (b64) =>
+        new Promise((res, rej) => {
+          const img = new Image();
+          img.onload = () => res(img);
+          img.onerror = rej;
+          img.src = `data:image/png;base64,${b64}`;
+        });
+      const [ia, ib] = await Promise.all([load(b64a), load(b64b)]);
+      const c = document.createElement('canvas');
+      c.width = ia.width;
+      c.height = ia.height;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(ia, 0, 0);
+      const da = g.getImageData(0, 0, c.width, c.height).data;
+      g.clearRect(0, 0, c.width, c.height);
+      g.drawImage(ib, 0, 0);
+      const db = g.getImageData(0, 0, c.width, c.height).data;
+      let over8 = 0;
+      let over32 = 0;
+      let sum = 0;
+      for (let i = 0; i < da.length; i += 4) {
+        const d = Math.max(
+          Math.abs(da[i] - db[i]),
+          Math.abs(da[i + 1] - db[i + 1]),
+          Math.abs(da[i + 2] - db[i + 2]),
+        );
+        if (d > 8) over8++;
+        if (d > 32) over32++;
+        sum += d;
+      }
+      return { px: da.length / 4, over8, over32, mean: +(sum / (da.length / 4)).toFixed(2) };
+    },
+    [a.toString('base64'), b.toString('base64')],
+  );
+}
+
 /* ---------------------------------------------------------------- desktop */
 
 {
@@ -192,13 +246,11 @@ const check = (name, pass, detail = '') => {
   const hud = await page.evaluate(() => {
     const arc = document.querySelector('#speed-arc');
     const cs = getComputedStyle(arc);
-    const ring = document.querySelector('.speed-ring');
     const chip = document.querySelector('.hud-chip');
     return {
       arcStroke: cs.stroke,
       arcDash: arc.style.strokeDasharray,
       arcFilter: cs.filter,
-      ringBezel: getComputedStyle(ring, '::before').maskImage.slice(0, 24),
       chipHairline: getComputedStyle(chip).boxShadow.includes('inset'),
       speedText: document.querySelector('#speed-value').textContent,
       nitroFill: document.querySelector('#nitro-fill').style.width,
@@ -214,11 +266,85 @@ const check = (name, pass, detail = '') => {
   );
   check('speed arc has an arc length', hud.arcDash !== '0 327', hud.arcDash);
   check('speed arc has a glow filter', hud.arcFilter.includes('drop-shadow'), hud.arcFilter);
-  check('ring tick bezel is masked', hud.ringBezel.length > 0, hud.ringBezel);
   check('chips keep their hairline', hud.chipHairline);
   check('both speed gradients declared', hud.gradients === 2, `n=${hud.gradients}`);
   check('item slot shows held state', hud.itemHas.includes('has-item'), hud.itemHas);
   console.log(`  (speed readout ${hud.speedText} km/h, nitro fill ${hud.nitroFill})`);
+
+  /*
+   * Ring decorations, proved by pixels.
+   *
+   * Everything in this corner that animates has to be hidden first, or the diff
+   * measures the arc growing and the speed number ticking instead of the
+   * decoration. That is not hypothetical: the first version of this check hid
+   * only the canvas, and reported the bezel delta and the noise floor as the
+   * same 231px — it was reading scene churn and would have passed on a bezel
+   * that never painted. Each pass below isolates exactly one decoration.
+   */
+  const HIDE = 'canvas,#speed-lines,.gear-tag{visibility:hidden !important}';
+  const ringBox = await page.locator('.speed-ring').first().boundingBox();
+  if (!ringBox) throw new Error('.speed-ring has no box — cannot run the paint diff');
+  const vp = page.viewportSize();
+  const pad = 16;
+  const clip = {
+    x: Math.max(0, Math.round(ringBox.x - pad)),
+    y: Math.max(0, Math.round(ringBox.y - pad)),
+  };
+  clip.width = Math.min(Math.round(ringBox.width + pad * 2), vp.width - clip.x);
+  clip.height = Math.min(Math.round(ringBox.height + pad * 2), vp.height - clip.y);
+
+  // One probe <style> that each pass rewrites, so the previous pass's hides do
+  // not leak into the next one.
+  const setProbe = (css) =>
+    page.evaluate((c) => {
+      let el = document.getElementById('__paint_probe__');
+      if (!el) {
+        el = document.createElement('style');
+        el.id = '__paint_probe__';
+        document.head.appendChild(el);
+      }
+      el.textContent = c;
+    }, css);
+
+  async function paintPass(label, isolateCss, killCss) {
+    await setProbe(HIDE + isolateCss);
+    const on = await page.screenshot({ path: `${outDir}/${label}.png`, clip });
+    const on2 = await page.screenshot({ clip });
+    await setProbe(HIDE + isolateCss + killCss);
+    const off = await page.screenshot({ clip });
+    return { noise: await diffShots(page, on, on2), delta: await diffShots(page, on, off) };
+  }
+
+  // Bezel alone: hide the svg (arc and both tracks) and the readout, and pin
+  // --speed-t so the bezel's speed-reactive opacity cannot drift between shots.
+  const bezelPass = await paintPass(
+    '06b-ring-bezel',
+    '.speed-ring > *{visibility:hidden !important}#app{--speed-t:1 !important}',
+    '.speed-ring::before{display:none !important}',
+  );
+  // Inner ring alone: hide the arc and the background track so the only thing
+  // left drawing inside the svg is .track-inner.
+  const innerPass = await paintPass(
+    '06c-ring-inner',
+    '.speed-readout,#speed-arc,.track-bg{visibility:hidden !important}',
+    '.track-inner{display:none !important}',
+  );
+
+  check(
+    'ring paint diff has a flat noise floor',
+    bezelPass.noise.over8 < 20 && innerPass.noise.over8 < 20,
+    `bezel ${bezelPass.noise.over8}px / inner ${innerPass.noise.over8}px differ >8/255`,
+  );
+  check(
+    'tick bezel actually paints',
+    bezelPass.delta.over32 > 150,
+    `${bezelPass.delta.over32}px differ >32/255 of ${bezelPass.delta.px}px, mean ${bezelPass.delta.mean}`,
+  );
+  check(
+    'inner reference ring actually paints',
+    innerPass.delta.over8 > 40,
+    `${innerPass.delta.over8}px differ >8/255 of ${innerPass.delta.px}px, mean ${innerPass.delta.mean}`,
+  );
 
   await ctx.close();
 }

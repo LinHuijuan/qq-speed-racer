@@ -572,32 +572,46 @@ kbd {
  * Outer tick bezel. A conic gradient under an annulus mask beats 24 hand-written
  * <line> elements: no extra DOM, one paint, and it cannot fall out of sync with
  * the ring's size. It brightens with speed, so the dial visibly "spins up".
+ *
+ * The mask must say `closest-side`, and that word is load-bearing. A bare
+ * `radial-gradient(circle ...)` sizes its ending shape to **farthest-corner**,
+ * which on a square box is 1.41x the half-width. The original 91%–99% annulus
+ * therefore resolved to a radius of 85–92px on a 132px ring whose own box only
+ * reaches 66px at the edge midpoints — i.e. the entire tick band sat outside the
+ * element and nothing ever painted. `closest-side` makes 100% equal the
+ * half-width, so the same percentages track the ring at any of its three sizes
+ * (132 desktop / 100 phone / 96 duo). See scripts/round5-shots.mjs, which now
+ * diffs pixels to prove this rather than reading the computed style back.
+ *
+ * The box is grown by 9px because the arc's stroke already reaches 92.5% of the
+ * half-width; without the extra room there is nowhere to put a tick band that
+ * does not overlap it.
  */
 .speed-ring::before {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: -9px;
   border-radius: 50%;
   background: repeating-conic-gradient(
     from 0deg at 50% 50%,
-    rgba(238, 244, 255, 0.5) 0deg 1deg,
+    rgba(238, 244, 255, 0.55) 0deg 1deg,
     transparent 1deg 15deg
   );
   -webkit-mask-image: radial-gradient(
-    circle at 50% 50%,
-    transparent 91%,
-    #000 92%,
-    #000 99%,
-    transparent 100%
+    circle closest-side at 50% 50%,
+    transparent 84%,
+    #000 85%,
+    #000 96%,
+    transparent 97%
   );
   mask-image: radial-gradient(
-    circle at 50% 50%,
-    transparent 91%,
-    #000 92%,
-    #000 99%,
-    transparent 100%
+    circle closest-side at 50% 50%,
+    transparent 84%,
+    #000 85%,
+    #000 96%,
+    transparent 97%
   );
-  opacity: calc(0.5 + var(--speed-t) * 0.5);
+  opacity: calc(0.45 + var(--speed-t) * 0.55);
   pointer-events: none;
 }
 
@@ -616,11 +630,15 @@ kbd {
   stroke-linecap: round;
 }
 
-/* Inner dashed reference ring — a second depth plane inside the dial. */
+/*
+ * Inner dashed reference ring — a second depth plane inside the dial.
+ * 0.07 alpha was invisible over a lit road; 0.15 reads as a faint dotted ring
+ * without competing with the speed readout it encircles.
+ */
 .track-inner {
   fill: none;
-  stroke: rgba(238, 244, 255, 0.07);
-  stroke-width: 1;
+  stroke: rgba(238, 244, 255, 0.15);
+  stroke-width: 1.1;
   stroke-dasharray: 2 6;
 }
 
