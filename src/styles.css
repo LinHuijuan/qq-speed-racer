@@ -951,8 +951,22 @@ kbd {
   font-size: 0.68rem;
 }
 
-/* Only one of the two wordings is ever shown; see the touch media query. */
+/* Only one of the wordings is ever shown; see the touch media query. */
 .hint-touch {
+  display: none;
+}
+
+/*
+ * "双人同屏 needs a keyboard" — shown on a touch layout in duo mode only.
+ *
+ * It is its own element under the mode buttons rather than another wording in
+ * the footer hint, because on a 360x740 phone the menu panel is 681px tall for
+ * 753px of content: the footer line is off screen, and a warning nobody can
+ * scroll to is not a warning. Deliberately not reusing `.duo-only`, whose duo
+ * rule sets `display: list-item` — right for the <li> it was written for, but
+ * it would grow a bullet on a <p>.
+ */
+.mode-note {
   display: none;
 }
 
@@ -1967,6 +1981,18 @@ body.duo-mode .duo-only {
   margin-bottom: 6px;
 }
 
+/* The only control legend that exists mid-race. Muted on purpose: it is a
+   reminder for the first few seconds, not a readout to watch. */
+.duo-keys {
+  margin: -2px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 209, 102, 0.18);
+  color: var(--muted);
+  font-size: 0.64rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
 .duo-row {
   display: flex;
   align-items: baseline;
@@ -2132,6 +2158,32 @@ body.duo-mode #touch-controls {
     display: inline;
   }
 
+  /* Touch *and* duo: the pad is hidden, so the joystick line would be a promise
+     the game does not keep. Drop it, and drop the paragraph with it rather than
+     leave a blank line where it used to be. */
+  body.duo-mode .hint-touch {
+    display: none;
+  }
+
+  body.duo-mode .mode-hint {
+    display: none;
+  }
+
+  /* ...and put the true statement where the decision is made. Deliberately
+     compact: on a 360x740 phone the panel has 681px for 753px of content, so
+     every pixel this callout takes comes off the bottom of the menu. */
+  body.duo-mode .mode-note {
+    display: block;
+    margin: 6px 0 0;
+    padding: 5px 10px;
+    border: 1px solid rgba(255, 209, 102, 0.3);
+    border-radius: 10px;
+    background: rgba(255, 209, 102, 0.1);
+    color: #ffd166;
+    font-size: 0.72rem;
+    line-height: 1.35;
+  }
+
   /*
    * The menu's controls list carries one wording per layout as well, and it is
    * the largest of the four — two full lines of key names on a screen that has
@@ -2165,6 +2217,23 @@ body.duo-mode #touch-controls {
 
   .panel {
     padding: 24px 18px 22px;
+    /*
+     * The base sheet caps the panel at min(92vh, 720px). That 720px is a
+     * desktop-shaped rule — it only binds once the viewport is taller than
+     * 783px — and on a 390x844 phone it was the cap, not the content, that
+     * decided the height: 92vh is 776px there, so 56px of usable screen was
+     * being thrown away and the panel scrolled for no reason. With the cap
+     * raised, the portrait menu's 753px of content fits outright (measured:
+     * clientHeight 774 vs scrollHeight 753) and the footer hint — which is
+     * where the "duo needs a keyboard" warning lives — stops being clipped.
+     *
+     * Still a cap, and still inside the overlay's own content box: the overlay
+     * has 20px of padding, so `100vh - 48px` leaves a 24px gutter on every
+     * side. On a short phone that gutter is the difference between the duo
+     * callout fitting and not — 92vh of a 740px screen is 681px, and 360x740
+     * needs 692px to keep 开始比赛 clear of the fold once the callout is up.
+     */
+    max-height: min(calc(100vh - 48px), 820px);
   }
 
   .panel > button {
@@ -2175,6 +2244,13 @@ body.duo-mode #touch-controls {
   .mode-btn {
     flex: 1;
     min-width: 0;
+  }
+
+  /* The reference list is the cheapest thing in the panel to tighten, and on a
+     360x740 phone the panel is 681px for 753px of content — 12px above and
+     below it was 24px of a budget that did not exist. */
+  .controls-list {
+    margin: 8px 0;
   }
 
   .track-picker {
@@ -2204,6 +2280,94 @@ body.duo-mode #touch-controls {
 
   .finish-stats {
     grid-template-columns: 1fr;
+  }
+}
+
+/*
+ * A narrow *desktop* window matches the width half of the query above but has a
+ * mouse, so it must not inherit the touch layout's one-card-per-row column:
+ * four of those are 320px of a panel that is 752px tall for 990px of content,
+ * which buried 开始比赛 by 131px (167px in duo) at 700x800 — the same defect the
+ * landscape phone had, reached from the other direction. Two columns is what
+ * the landscape block already uses for the same reason, and at this width each
+ * card is still 200px wide.
+ *
+ * Keyed on `pointer: fine` rather than a height, because the point is that this
+ * window can be resized; a touch device at the same width gets the carousel
+ * instead.
+ */
+@media (max-width: 820px) and (pointer: fine) {
+  .track-picker {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .track-btn {
+    grid-template-columns: 48px 1fr;
+    min-height: 62px;
+    padding: 6px 8px;
+  }
+
+  .track-map {
+    width: 48px;
+    height: 48px;
+  }
+
+  /* ...and the same for the car row. The touch layout stacks it 2x2, which is
+     right for a 282px column and costs 94px here — enough on its own to bury
+     the CTA again at 820x700, where the panel has 652px for 712px of content. */
+  .car-picker {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/*
+ * Portrait phones: the four track cards were the whole reason 开始比赛 sat below
+ * the fold. Four full-width cards are 312px of a ~670px content box — 46% of
+ * the panel spent on a choice the player makes once — and the panel is capped
+ * at 92vh, so on a 390x844 phone the button ended up 150px past the bottom edge
+ * (189px on a 360x740). Shrinking the cards is not available: they are already
+ * a 56px map plus two lines of text, and two columns of them leaves 87px for a
+ * subtitle that needs 89px.
+ *
+ * So they become one row that scrolls sideways. The row drops from 312px to
+ * ~90px and the card keeps the exact size it had.
+ *
+ *   - `scroll-snap-type: x mandatory` makes a flick land on a card rather than
+ *     between two.
+ *   - `width: min(78%, 300px)` leaves the next card peeking, so the row reads
+ *     as scrollable instead of as a clipped grid; the 300px cap keeps the cards
+ *     from looking oversized on a portrait tablet, where there was room for the
+ *     old grid but this stays the same design either way.
+ *   - No `touch-action` override. The panel scrolls vertically and this scrolls
+ *     horizontally, and it is the default `auto` that lets the browser choose
+ *     the axis from the gesture. `pan-x` would have made the panel unscrollable
+ *     for any drag that began on a card — which is most of the panel.
+ */
+@media (pointer: coarse) and (orientation: portrait) {
+  #overlay-start #track-picker {
+    display: flex;
+    gap: 10px;
+    /* Bleed out to the panel's padding edge so cards run off the side rather
+       than stopping short of it. 18px is the panel's own horizontal padding.
+       The vertical padding is the smallest that still lets the selected card's
+       22px glow show above and below. */
+    margin: 8px -18px 4px;
+    padding: 4px 18px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  #overlay-start #track-picker::-webkit-scrollbar {
+    display: none;
+  }
+
+  #overlay-start .track-btn {
+    flex: 0 0 auto;
+    width: min(78%, 300px);
+    scroll-snap-align: start;
   }
 }
 
@@ -2273,8 +2437,15 @@ body.duo-mode #touch-controls {
  *
  * The height term is what catches short desktop windows, so this is keyed on
  * both axes rather than on `orientation` alone.
+ *
+ * 690px, not 560px: the single-column panel needs 621px of height before
+ * 开始比赛 clears its own bottom edge (measured — panel height is 92vh, so that
+ * is a 675px viewport), and 1366x640 and 1280x640 are ordinary laptop windows
+ * that sat under it with the CTA buried by 32px, 1024x600 by 69px. Above 690px
+ * the single column still has +23px of slack at 1280x700, so this is the
+ * lowest threshold that leaves no gap between "compact" and "fits".
  */
-@media (orientation: landscape) and (max-height: 560px) {
+@media (orientation: landscape) and (max-height: 690px) {
   #overlay-start .panel,
   #overlay-finish .panel,
   #overlay-pause .panel {

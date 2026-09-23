@@ -119,6 +119,15 @@
         <div id="duo-panel" class="duo-panel" style="display:none">
           <div class="duo-side p2-side">
             <div class="duo-tag">P2</div>
+            <!--
+              There is no on-screen control legend during a race, and duo mode is
+              the one place it is needed: P1 drives with WASD on the right half,
+              P2 with the arrow keys on this one, and a player who forgot which
+              is which has nothing to look at. On a touch layout this is also the
+              only thing that explains why the split screen is inert — the pad is
+              hidden in duo mode (see the .hint-touch-duo rule in styles.css).
+            -->
+            <div class="duo-keys">键盘操作 · P1 WASD · P2 方向键</div>
             <div class="duo-row">
               <strong id="p2-speed">0</strong>
               <span>km/h</span>
@@ -163,6 +172,16 @@
             <button type="button" id="mode-solo" class="mode-btn active">单人</button>
             <button type="button" id="mode-duo" class="mode-btn">双人同屏</button>
           </div>
+          <!--
+            Duo mode hides #touch-controls outright (body.duo-mode, styles.css)
+            and P2 has no touch binding at all — P2_BINDINGS is keyboard only —
+            so on a touch layout the split screen is inert for both players. This
+            says so, and it belongs directly under the buttons that cause it
+            rather than in the footer hint: on a 360x740 phone the panel is
+            681px for 753px of content, so the last line of the menu is off
+            screen entirely. Shown on a touch layout in duo mode only.
+          -->
+          <p class="mode-note">双人同屏需键盘：P1 WASD · P2 方向键</p>
           <div id="track-picker" class="track-picker" aria-label="选择赛道"></div>
           <div id="car-picker" class="car-picker" aria-label="选择赛车"></div>
           <!-- Difficulty and mute used to live only in the pause panel, which is
@@ -198,7 +217,16 @@
                  steer and -y to throttle (InputController.updatePointer). -->
             <li class="hint-touch"><strong>P1</strong> 左摇杆 转向油门 · 「漂移」蓄能 · 「氮气」爆发 · 「道具」使用 · 「回道」脱困</li>
           </ul>
-          <p class="hint">双人模式为左右分屏 · 手机端可虚拟摇杆</p>
+          <!--
+            `.mode-hint` exists so the duo rules below can hide this whole line
+            rather than leave an empty paragraph behind: on a touch layout in duo
+            mode both of its wordings are wrong (the joystick it advertises is
+            hidden), and the mode note above has already said the true thing.
+          -->
+          <p class="hint mode-hint">
+            <span class="hint-keyboard">双人模式为左右分屏 · P2 用方向键操作</span>
+            <span class="hint-touch">手机端可用虚拟摇杆</span>
+          </p>
         </div>
       </div>
 
