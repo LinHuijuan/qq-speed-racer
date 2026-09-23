@@ -204,6 +204,15 @@ export class Game {
   private rng = createSeededRandom(7);
   private pausedForScreenshot = false;
   /**
+   * Set by the `placeCamera` test hook. While it holds a pose the chase rig is
+   * skipped and P1's camera is parked there, so a script can orbit the kart and
+   * look at the model instead of at the back of it from 3m away. Null in normal
+   * play — nothing in the game path ever sets it.
+   */
+  private freeCam: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
+  /** Test-hook flag: keeps the AI field out of model-inspection shots. */
+  private rivalsHidden = false;
+  /**
    * Honours the OS "reduce motion" preference. The stylesheet already reacts to
    * it, but the 3D scene did not: particles, camera shake and the full-screen
    * boost flash all kept running. The test hook can override it either way.
@@ -904,8 +913,8 @@ export class Game {
     const diff = this.difficultyScale();
     for (let i = 0; i < this.ais.length; i += 1) {
       const ai = this.ais[i];
-      ai.kart.group.visible = i < aiCount;
-      if (i >= aiCount) continue;
+      ai.kart.group.visible = !this.rivalsHidden && i < aiCount;
+      if (this.rivalsHidden || i >= aiCount) continue;
       ai.setDifficultyScale(diff);
       ai.update(delta, this.track, raceActive, leadProgress);
       this.trackProgressForKart(ai.kart.state, raceActive);
@@ -928,7 +937,12 @@ export class Game {
     if (this.mode === 'duo') this.emitPlayerVfx(this.player2);
 
     const p1 = this.player1.kart.state;
-    this.cameraRig1.update(delta, p1.position, p1.heading, p1.speed, p1.isBoosting);
+    if (this.freeCam) {
+      this.cameraP1.position.copy(this.freeCam.pos);
+      this.cameraP1.lookAt(this.freeCam.look);
+    } else {
+      this.cameraRig1.update(delta, p1.position, p1.heading, p1.speed, p1.isBoosting);
+    }
     if (this.mode === 'duo') {
       const p2 = this.player2.kart.state;
       this.cameraRig2.update(delta, p2.position, p2.heading, p2.speed, p2.isBoosting);
@@ -1923,6 +1937,42 @@ export class Game {
         const to = this.scratchTo.copy(target.position).sub(s.position);
         const distance = to.length();
         return { drafted: true, distance, dot: distance > 0 ? to.normalize().dot(forward) : 0 };
+      },
+      /**
+       * Switches P1's livery through the real menu path, so the screenshot shows
+       * exactly what a player picking that card gets.
+       */
+      selectCar: (id: string) => {
+        this.selectCar(id);
+        this.render();
+        this.publishDiagnostics();
+        return { car: this.settings.carId };
+      },
+      /**
+       * Parks P1's camera at a world-space pose and stops the chase rig from
+       * moving it. Pass `null` to hand control back. Offsets are easier to
+       * compute in the caller (which can read the kart pose from diagnostics)
+       * than to express as a rig-relative distance.
+       */
+      placeCamera: (pos: [number, number, number], look: [number, number, number]) => {
+        this.freeCam = {
+          pos: new THREE.Vector3(pos[0], pos[1], pos[2]),
+          look: new THREE.Vector3(look[0], look[1], look[2]),
+        };
+        this.cameraP1.position.copy(this.freeCam.pos);
+        this.cameraP1.lookAt(this.freeCam.look);
+        this.render();
+        this.publishDiagnostics();
+        return { pos, look };
+      },
+      clearCamera: () => {
+        this.freeCam = null;
+        return { free: false };
+      },
+      /** Hides the AI field so a close-up is not photobombed by three rivals. */
+      hideRivals: (hidden: boolean) => {
+        this.rivalsHidden = hidden;
+        return { hidden };
       },
       setPausedForScreenshot: (paused: boolean) => {
         this.pausedForScreenshot = paused;

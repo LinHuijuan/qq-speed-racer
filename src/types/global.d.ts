@@ -10,6 +10,13 @@ declare global {
       setTrack?: (id: string) => { track: string };
       forceRace?: () => { phase: string; mode: string };
       setState: (name: string) => { state: string };
+      selectCar?: (id: string) => { car: string };
+      placeCamera?: (
+        pos: [number, number, number],
+        look: [number, number, number],
+      ) => { pos: [number, number, number]; look: [number, number, number] };
+      clearCamera?: () => { free: boolean };
+      hideRivals?: (hidden: boolean) => { hidden: boolean };
       grantItem?: (type?: string) => { item: string | null };
       draftPlayer?: () => { drafted: boolean; distance: number; dot: number };
       setPausedForScreenshot: (paused: boolean) => void;
