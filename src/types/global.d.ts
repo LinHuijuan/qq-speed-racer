@@ -19,6 +19,13 @@ declare global {
       hideRivals?: (hidden: boolean) => { hidden: boolean };
       grantItem?: (type?: string) => { item: string | null };
       draftPlayer?: () => { drafted: boolean; distance: number; dot: number };
+      armCoach?: () => { step: number };
+      setCoachStep?: (n: number) => { step: number };
+      setCoachDone?: (done: boolean) => { coachDone: boolean };
+      faceBackwards?: () => { heading: number };
+      finishLast?: () => { rank: number };
+      openHelp?: () => { open: boolean };
+      closeHelp?: () => { open: boolean };
       setPausedForScreenshot: (paused: boolean) => void;
       setReducedMotion: (enabled: boolean) => void;
       hideDebugUi: (hidden: boolean) => void;
@@ -37,6 +44,9 @@ declare global {
       complete?: boolean;
       reducedMotion?: boolean;
       vfxLive?: number;
+      /** First-race coaching: 0 = not running, 1..4 = the step on screen. */
+      coach?: { step: number; done: boolean };
+      helpOpen?: boolean;
       score?: number;
       targetScore?: number;
       player?: {

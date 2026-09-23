@@ -1243,6 +1243,15 @@ kbd {
   border: 1px solid rgba(255, 255, 255, 0.22) !important;
 }
 
+/* "重新开启新手引导" reports success by disabling itself, so it needs a state
+   that reads as done rather than as broken. */
+.panel > button:disabled {
+  opacity: 0.62;
+  cursor: default;
+  filter: none;
+  box-shadow: none;
+}
+
 .settings-block {
   margin: 12px 0;
   text-align: left;
@@ -2094,6 +2103,300 @@ body.duo-mode #touch-controls {
   }
 }
 
+/* ==========================================================================
+   Transient messages — wrong way, rejected input, first-race coaching
+   ==========================================================================
+ *
+ * A new player's three worst moments are all silent: pressing 氮气 with an empty
+ * tank does nothing, holding 漂移 below 12 m/s or without steering does nothing,
+ * and pressing 道具 with no item does nothing. Every one of them looks like a
+ * broken button. They are reported here instead.
+ *
+ * All three share one column, anchored to the top edge of .hud-bottom rather
+ * than to a viewport offset. .hud-bottom is absolutely positioned, so it is the
+ * containing block, and `bottom: 100%` keeps the column clear of the clusters
+ * however tall they grow — 134px on desktop, 231px in portrait, 130px in
+ * landscape — without three hardcoded offsets that go stale the next time a
+ * cluster changes size.
+ */
+
+#hud-alerts {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: min(92vw, 460px);
+  pointer-events: none;
+}
+
+/* Hidden alerts must not reserve a slot: with `visibility` they would still
+   push the ones below them down, so the column's stacking would depend on which
+   messages happened to be off. */
+#hud-alerts > .alert {
+  display: none;
+}
+
+#hud-alerts > .alert.visible {
+  display: flex;
+  animation: alert-rise 0.22s ease-out;
+}
+
+/*
+ * Animates `transform` only, deliberately. `document.timeline.currentTime` is
+ * frozen at 0 under headless + SwiftShader, so a keyframe starting at
+ * `opacity: 0` would leave the element permanently invisible to every
+ * screenshot and pixel assertion in scripts/ — the element would be "visible"
+ * in the DOM and invisible in the frame.
+ */
+@keyframes alert-rise {
+  from {
+    transform: translateY(7px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.alert {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background-image:
+    linear-gradient(160deg, rgba(26, 38, 70, 0.95), rgba(9, 13, 28, 0.92)),
+    linear-gradient(
+      160deg,
+      rgba(45, 226, 255, 0.85),
+      rgba(238, 244, 255, 0.16) 55%,
+      rgba(255, 60, 172, 0.6)
+    );
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-align: center;
+  box-shadow: var(--hairline), var(--shadow);
+}
+
+/* "You are driving the wrong way" — the one message worth shouting. The pulse
+   is on the icon rather than the pill: `#hud-alerts > .alert.visible` (1,2,0)
+   owns the entrance animation and would win against a plain `.alert-danger`
+   rule, so an animation declared here would never run. */
+.alert-danger {
+  background-image:
+    linear-gradient(160deg, rgba(54, 14, 26, 0.95), rgba(16, 6, 12, 0.92)),
+    linear-gradient(
+      160deg,
+      rgba(255, 79, 122, 0.95),
+      rgba(255, 209, 102, 0.28) 55%,
+      rgba(255, 60, 172, 0.85)
+    );
+  color: #ffd0dc;
+  box-shadow: var(--hairline), 0 0 26px rgba(255, 79, 122, 0.3), var(--shadow);
+}
+
+.alert-danger .alert-icon {
+  font-size: 1.05rem;
+  line-height: 1;
+  color: #ff8fa8;
+  animation: wrong-way-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes wrong-way-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.45);
+  }
+}
+
+/* A rejected input. Gold, matching the off-track toast, because both mean
+   "the game heard you and is telling you why nothing happened". */
+.alert-hint {
+  background-image:
+    linear-gradient(160deg, rgba(48, 38, 12, 0.95), rgba(16, 13, 6, 0.92)),
+    linear-gradient(
+      160deg,
+      rgba(255, 209, 102, 0.9),
+      rgba(238, 244, 255, 0.16) 55%,
+      rgba(255, 138, 31, 0.6)
+    );
+  color: #ffe6b0;
+}
+
+/* First-race coaching. Cyan, and wide enough to hold a sentence — it is the
+   only alert that carries an instruction rather than a complaint. */
+.alert-coach {
+  max-width: 100%;
+  background-image:
+    linear-gradient(160deg, rgba(18, 32, 60, 0.95), rgba(8, 12, 26, 0.92)),
+    linear-gradient(
+      160deg,
+      rgba(45, 226, 255, 0.9),
+      rgba(123, 92, 255, 0.5) 55%,
+      rgba(255, 60, 172, 0.6)
+    );
+}
+
+.alert-badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(45, 226, 255, 0.18);
+  color: var(--cyan);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+}
+
+/* ==========================================================================
+   "怎么玩？" — the menu / pause entry point and the help panel
+   ========================================================================== */
+
+/*
+ * Two classes on purpose. Both entry points live inside a <p> (the eyebrow line
+ * and the pause hint), so `.panel > button` does not match them but the
+ * descendant `.panel button` (0,1,1) does — and it would repaint them as
+ * primary gradient pills with a 200px min-width. A two-class selector wins.
+ */
+.ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background-image:
+    linear-gradient(160deg, rgba(18, 26, 48, 0.9), rgba(8, 12, 26, 0.85)),
+    linear-gradient(160deg, rgba(45, 226, 255, 0.55), rgba(238, 244, 255, 0.12));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  color: var(--cyan);
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--hairline-soft);
+  transition:
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.ghost-btn:hover {
+  color: var(--ink);
+  box-shadow: var(--hairline), 0 0 18px rgba(45, 226, 255, 0.28);
+}
+
+/* The eyebrow is a block with a centred `::after` rule; the button rides the
+   same line so the menu gains an entry point without gaining a row. */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.hint .ghost-btn {
+  margin-left: 8px;
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 0.72rem;
+  vertical-align: middle;
+}
+
+.help-steps {
+  counter-reset: help-step;
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 6px;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.help-steps li {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  grid-template-areas:
+    'num title'
+    'num body';
+  align-items: start;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background-image:
+    linear-gradient(160deg, rgba(20, 30, 56, 0.9), rgba(8, 12, 26, 0.86)),
+    linear-gradient(160deg, rgba(45, 226, 255, 0.34), rgba(238, 244, 255, 0.08));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+}
+
+.help-steps li::before {
+  counter-increment: help-step;
+  content: counter(help-step);
+  grid-area: num;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(140deg, var(--cyan), var(--magenta));
+  color: #06101c;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.help-steps strong {
+  grid-area: title;
+  font-size: 0.92rem;
+  letter-spacing: 0.04em;
+}
+
+.help-steps span {
+  grid-area: body;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.help-note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  text-align: left;
+}
+
+/* ==========================================================================
+   Item slot: the empty state has its own wording
+   ========================================================================== */
+
+/*
+ * "按 E 使用" is a lie while the slot is empty — and empty is the state a new
+ * player spends the entire first lap in. (0,3,0), so it beats `.hint-keyboard`
+ * / `.hint-touch` (0,1,0) and the pair swaps as one, with no dependence on
+ * which media query happened to fire.
+ */
+.item-label.has-item .item-label-empty,
+.item-label:not(.has-item) .item-label-use {
+  display: none;
+}
+
 @media (pointer: coarse), (max-width: 820px) {
   .hud-top {
     gap: 6px;
@@ -2280,6 +2583,19 @@ body.duo-mode #touch-controls {
 
   .finish-stats {
     grid-template-columns: 1fr;
+  }
+
+  /* Same column, tighter, and capped so it cannot grow sideways into the combo
+     stack on a narrow screen. */
+  #hud-alerts {
+    bottom: calc(100% + 8px);
+    max-width: min(88vw, 360px);
+    gap: 6px;
+  }
+
+  .alert {
+    padding: 7px 12px;
+    font-size: 0.78rem;
   }
 }
 
@@ -2672,5 +2988,88 @@ body.duo-mode #touch-controls {
     grid-area: hint;
     align-self: start;
     margin-top: 12px;
+  }
+}
+
+/*
+ * Very short viewports: the bottom-anchored alert column has nowhere to go.
+ *
+ * At 844x390 .hud-bottom starts at y=84, so `bottom: 100% + 8px` would park the
+ * column at y~30 — straight through the HUD chips, which end at y=80. There is
+ * no free horizontal band at that height either: the speed cluster ends at
+ * x=168, the nitro panel starts at x=522, and the status line sits between
+ * them. So the column moves under the status line and is capped to the 190px
+ * that fits between centre and the nitro panel, rather than being dropped
+ * outright the way the off-track toast is — "逆行 · 请掉头" is worth a narrow
+ * pill, and it is the one message that must not be silent.
+ */
+@media (max-height: 480px) {
+  #hud-alerts {
+    bottom: auto;
+    top: calc(max(88px, calc(env(safe-area-inset-top) + 88px)) + 44px);
+    max-width: 190px;
+    gap: 6px;
+  }
+
+  .alert {
+    padding: 6px 10px;
+    font-size: 0.72rem;
+    line-height: 1.3;
+    border-radius: 12px;
+  }
+}
+
+/*
+ * Help panel: two columns, like the other three overlays, because a flat block
+ * of four steps plus two buttons is ~366px of content in a 380px window. The
+ * steps stack on the left; the note and the two buttons ride the right.
+ */
+@media (orientation: landscape) and (max-height: 690px) {
+  #overlay-help .panel {
+    width: min(760px, 100%);
+    max-height: calc(100vh - 10px);
+    padding: 14px 18px 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+    grid-template-areas:
+      'eyebrow note'
+      'title   note'
+      'steps   close'
+      'steps   coach';
+    column-gap: 18px;
+    align-content: start;
+  }
+
+  #overlay-help .eyebrow {
+    grid-area: eyebrow;
+    margin: 0 0 6px;
+  }
+
+  #overlay-help h2 {
+    grid-area: title;
+  }
+
+  #overlay-help .help-steps {
+    grid-area: steps;
+    margin: 8px 0 0;
+    gap: 6px;
+  }
+
+  #overlay-help .help-steps li {
+    padding: 6px 10px;
+  }
+
+  #overlay-help .help-note {
+    grid-area: note;
+    margin: 0;
+    font-size: 0.74rem;
+  }
+
+  #overlay-help #help-close-button {
+    grid-area: close;
+  }
+
+  #overlay-help #help-coach-button {
+    grid-area: coach;
   }
 }

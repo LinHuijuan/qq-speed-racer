@@ -71,6 +71,12 @@ export class Hud {
   private readonly centerBanner = this.el('#center-banner');
   private readonly comboStack = this.el('#combo-stack');
   private readonly itemSlot = this.el('#item-slot');
+  private readonly itemLabel = this.el('#item-label');
+  private readonly wrongWay = this.el('#wrong-way');
+  private readonly actionToast = this.el('#action-toast');
+  private readonly coachHint = this.el('#coach-hint');
+  private readonly coachStep = this.el('#coach-step');
+  private readonly coachText = this.el('#coach-text');
   private readonly itemIcon = this.el('#item-icon');
   private readonly driftPips = [
     this.el('#drift-pip-1'),
@@ -125,6 +131,19 @@ export class Hud {
     hintColor: '',
     status: '',
   };
+
+  /*
+   * Alerts are event driven, not per-frame, so they are written directly rather
+   * than diffed through `last` like the chips. The only state worth caching is
+   * "is it up", because toggling a class off and on again every frame would
+   * restart the entrance animation.
+   */
+  private actionToken = 0;
+  private lastActionText = '';
+  private lastActionAt = Number.NEGATIVE_INFINITY;
+  private wrongWayShown = false;
+  /** `step/total|text` — one key, so a repeat frame costs nothing. */
+  private coachKey = '';
 
   setMode(mode: HudMode): void {
     this.duoPanel.style.display = mode === 'duo' ? '' : 'none';
@@ -199,6 +218,8 @@ export class Hud {
     trackBest?: number | null;
     newRecord?: boolean;
     duoSummary?: string;
+    /** Replaces the record line when there is a suggestion worth more than it. */
+    tip?: string;
   }): void {
     this.overlayStart.classList.remove('visible');
     this.overlayStart.style.display = 'none';
@@ -216,6 +237,13 @@ export class Hud {
     if (summary.newRecord) {
       rec.style.display = '';
       rec.textContent = '★ 本赛道新纪录！';
+    } else if (summary.tip) {
+      // A player who just finished last gets the actionable line here instead of
+      // their best time: the time is already on the stats row above, and this
+      // element already has a grid area in the landscape layout — a new element
+      // would have been auto-placed into a fresh row and pushed the CTA down.
+      rec.style.display = '';
+      rec.textContent = summary.tip;
     } else if (summary.trackBest != null) {
       rec.style.display = '';
       rec.textContent = `本赛道最佳 ${formatTime(summary.trackBest)}`;
@@ -247,6 +275,71 @@ export class Hud {
     this.nitroFlash.classList.add('active');
     this.statusLine.classList.add('pulse');
     window.setTimeout(() => this.statusLine.classList.remove('pulse'), 400);
+  }
+
+  /**
+   * The one channel for "the game heard you, and here is why nothing happened".
+   *
+   * Repeats of the same wording inside 1.6s are swallowed. Every caller is
+   * edge-triggered on a key press, but a player mashing 氮气 on an empty tank
+   * would otherwise restart the pill several times a second and never read it.
+   * A *different* wording always gets through — it is new information.
+   */
+  showAction(text: string, kind: 'warn' | 'good' = 'warn', holdSeconds = 3): void {
+    if (!text) return;
+    const now = performance.now();
+    if (text === this.lastActionText && now - this.lastActionAt < 1600) return;
+    this.lastActionText = text;
+    this.lastActionAt = now;
+    this.actionToast.textContent = text;
+    this.actionToast.classList.toggle('good', kind === 'good');
+    this.actionToast.classList.add('visible');
+    this.actionToken += 1;
+    const token = this.actionToken;
+    window.setTimeout(() => {
+      // A newer toast owns the element by now; its own timer retires it.
+      if (token !== this.actionToken) return;
+      this.actionToast.classList.remove('visible');
+    }, holdSeconds * 1000);
+  }
+
+  hideAction(): void {
+    this.actionToken += 1;
+    this.actionToast.classList.remove('visible');
+  }
+
+  setWrongWay(visible: boolean): void {
+    if (visible === this.wrongWayShown) return;
+    this.wrongWayShown = visible;
+    this.wrongWay.classList.toggle('visible', visible);
+  }
+
+  /**
+   * `null` retires the coaching line; the step badge reads `step/total`.
+   *
+   * Driven from the render loop, so it caches on the rendered content rather
+   * than on visibility alone — the caller pushes every frame and only the four
+   * step changes are worth a DOM write.
+   */
+  setCoach(text: string | null, step = 1, total = 4): void {
+    const visible = text != null && text !== '';
+    const key = visible ? `${step}/${total}|${text}` : '';
+    if (key === this.coachKey) return;
+    this.coachKey = key;
+    this.coachHint.classList.toggle('visible', visible);
+    if (!visible) return;
+    this.coachText.textContent = text as string;
+    this.coachStep.textContent = `${step}/${total}`;
+  }
+
+  /**
+   * True when the on-screen pad is the control surface. Mirrors the stylesheet's
+   * `(pointer: coarse), (max-width: 820px)` breakpoint, which is what decides
+   * whether the markup shows `.hint-keyboard` or `.hint-touch` — the coaching
+   * copy is set from TypeScript, so it has to make the same choice itself.
+   */
+  get isTouchLayout(): boolean {
+    return this.touchLayout.matches;
   }
 
   update(state: RaceHudState): void {
@@ -348,6 +441,8 @@ export class Hud {
     if (hasItem !== last.hasItem) {
       last.hasItem = hasItem;
       this.itemSlot.classList.toggle('has-item', hasItem);
+      // The label swaps wording with it: "按 E 使用" is wrong while empty.
+      this.itemLabel.classList.toggle('has-item', hasItem);
     }
 
     if (state.mode === 'duo') {

@@ -2,6 +2,12 @@ export type GameSettings = {
   muted: boolean;
   difficulty: 'easy' | 'normal' | 'hard';
   carId: string;
+  /**
+   * True once the player has worked through the four first-race coaching steps.
+   * Defaults to false, so a brand-new install gets them; the help panel puts it
+   * back to false for anyone who wants to see them again.
+   */
+  coachDone: boolean;
 };
 
 export type TrackBests = Record<string, number>;
@@ -13,6 +19,7 @@ const defaults: GameSettings = {
   muted: false,
   difficulty: 'normal',
   carId: 'neon-blue',
+  coachDone: false,
 };
 
 export function loadSettings(): GameSettings {
@@ -27,6 +34,9 @@ export function loadSettings(): GameSettings {
           ? parsed.difficulty
           : 'normal',
       carId: typeof parsed.carId === 'string' && parsed.carId ? parsed.carId : defaults.carId,
+      // Absent means "a save written before coaching existed" — treat it as not
+      // done, so an existing player sees the coaching once rather than never.
+      coachDone: parsed.coachDone === true,
     };
   } catch {
     return { ...defaults };

@@ -13,7 +13,11 @@ import {
 } from '../core/Renderer';
 import { AIRacer } from '../entities/AIRacer';
 import type { Kart } from '../entities/Kart';
-import { PlayerRacer } from '../entities/PlayerRacer';
+import {
+  MIN_SPEED_TO_DRIFT,
+  MIN_STEER_TO_DRIFT,
+  PlayerRacer,
+} from '../entities/PlayerRacer';
 import { AudioSystem } from '../systems/AudioSystem';
 import { CameraRig } from '../systems/CameraRig';
 import { Hud, type MinimapDot, type RaceHudState } from '../systems/Hud';
@@ -44,6 +48,50 @@ const PIP_INTERVAL = 1 / 20;
  * while drafting, so without a cooldown the HUD appended a chip per frame.
  */
 const SLIPSTREAM_TOAST_INTERVAL = 1.6;
+
+/**
+ * First-race coaching: the four actions a player cannot discover from a controls
+ * list, in the order they need them. Each step retires on the action it names
+ * (see `updateCoach`), so the sequence is driven by what the player does rather
+ * than by a timer — someone who works it out in ten seconds is done in ten
+ * seconds.
+ *
+ * Two wordings per step, mirroring the `.hint-keyboard` / `.hint-touch` split in
+ * the markup: a coaching line that still says "Shift" on a phone is the exact
+ * failure that split exists to prevent.
+ */
+const COACH_STEPS: ReadonlyArray<{ keyboard: string; touch: string }> = [
+  {
+    keyboard: '按住 W（或 ↑）把车跑起来',
+    touch: '把左摇杆向前推，把车跑起来',
+  },
+  {
+    keyboard: '进弯时按住 Shift，同时按 A / D 转向',
+    touch: '进弯时按住「漂移」，同时把摇杆推向弯道',
+  },
+  {
+    keyboard: '松开 Shift → 立刻小喷加速',
+    touch: '松开「漂移」→ 立刻小喷加速',
+  },
+  {
+    keyboard: '漂移给氮气充能，满了按 空格 爆发',
+    touch: '漂移给氮气充能，满了按「氮气」爆发',
+  },
+];
+
+/**
+ * Coaching that outlives the player's patience is just clutter on the HUD, so
+ * it gives up after this much racing rather than sitting there for three laps.
+ */
+const COACH_TIMEOUT_SECONDS = 90;
+
+/**
+ * Heading-vs-track-tangent dot below which the kart counts as facing backwards.
+ * A wall bounce spins the kart through 180 degrees and back, so this is paired
+ * with a debounce — see `updateWrongWay`.
+ */
+const WRONG_WAY_DOT = -0.35;
+const WRONG_WAY_DEBOUNCE = 0.45;
 
 type RacePhase = 'menu' | 'countdown' | 'racing' | 'finished';
 
@@ -228,6 +276,30 @@ export class Game {
   private lastSpeedLinesBoost = false;
   private lastSpeedLinesDrift = false;
   private lastOffTrackHelpVisible = false;
+  /*
+   * Newbie-facing state. Every field here is driven by an event — a key press,
+   * a state crossing a threshold, an overlay opening — and the HUD caches the
+   * rendered result, so none of it costs a DOM write on a steady-state frame.
+   */
+  private readonly overlayHelp = this.getElement('#overlay-help');
+  private readonly helpButton = this.getElement('#help-button');
+  private readonly pauseHelpButton = this.getElement('#pause-help-button');
+  private readonly helpCloseButton = this.getElement('#help-close-button');
+  private readonly helpCoachButton = this.getElement(
+    '#help-coach-button',
+  ) as HTMLButtonElement;
+  private helpOpen = false;
+  private lastNitroDown = false;
+  private lastDriftDown = false;
+  private wrongWayTimer = 0;
+  private wrongWayShown = false;
+  /** 0 = not running, 1..COACH_STEPS.length = the step on screen. */
+  private coachStep = 0;
+  /** Set by the `setCoachStep` test hook so a step can be held for a shot. */
+  private coachPinned = false;
+  private coachElapsed = 0;
+  private coachDriftBoost = false;
+  private coachNitro = false;
   private readonly startButton = this.getElement('#start-button');
   private readonly continueButton = this.getElement('#continue-button');
   private readonly restartButton = this.getElement('#restart-button');
@@ -336,6 +408,17 @@ export class Game {
     this.pauseMenuButton.addEventListener('click', () => {
       this.togglePause(false);
       this.returnToMenu();
+    });
+    this.helpButton.addEventListener('click', () => this.openHelp());
+    this.pauseHelpButton.addEventListener('click', () => this.openHelp());
+    this.helpCloseButton.addEventListener('click', () => this.closeHelp());
+    this.helpCoachButton.addEventListener('click', () => {
+      // The coaching runs once per install by default; this is the way back in
+      // for anyone who skipped it or wants a refresher.
+      this.settings.coachDone = false;
+      saveSettings(this.settings);
+      this.helpCoachButton.textContent = '已开启 · 下一场比赛生效';
+      this.helpCoachButton.disabled = true;
     });
     this.muteToggles.forEach((el) => {
       el.addEventListener('click', () => this.setMuted(!this.settings.muted));
@@ -514,9 +597,47 @@ export class Game {
   private readonly onGlobalKey = (event: KeyboardEvent) => {
     if (event.code === 'Escape') {
       event.preventDefault();
+      // The help sheet sits on top of whatever opened it, so it takes the first
+      // Esc: dismissing a reference page should not also resume the race behind
+      // it, which the player cannot see yet.
+      if (this.helpOpen) {
+        this.closeHelp();
+        return;
+      }
       this.togglePause();
     }
   };
+
+  /**
+   * The help sheet is a reference, not a mode. Opened from a paused race it
+   * leaves the race paused and puts the pause panel back on close, so a player
+   * who checks the drift keys mid-race does not return to a live car.
+   */
+  private openHelp(): void {
+    const inRace = this.phase === 'racing' || this.phase === 'countdown';
+    this.helpOpen = true;
+    this.overlayHelp.style.display = '';
+    this.overlayHelp.classList.add('visible');
+    if (inRace) {
+      this.paused = true;
+      this.overlayPause.classList.remove('visible');
+      this.overlayPause.style.display = 'none';
+    }
+    this.helpCoachButton.textContent = '重新开启新手引导';
+    this.helpCoachButton.disabled = false;
+  }
+
+  private closeHelp(): void {
+    if (!this.helpOpen) return;
+    this.helpOpen = false;
+    this.overlayHelp.classList.remove('visible');
+    this.overlayHelp.style.display = 'none';
+    const inRace = this.phase === 'racing' || this.phase === 'countdown';
+    if (inRace && this.paused) {
+      this.overlayPause.classList.add('visible');
+      this.overlayPause.style.display = '';
+    }
+  }
 
   private setMuted(muted: boolean): void {
     this.settings.muted = muted;
@@ -568,6 +689,7 @@ export class Game {
   }
 
   private returnToMenu(): void {
+    this.closeHelp();
     this.paused = false;
     this.overlayPause.style.display = 'none';
     this.overlayPause.classList.remove('visible');
@@ -687,6 +809,18 @@ export class Game {
     this.modeSolo.classList.toggle('active', mode === 'solo');
     this.modeDuo.classList.toggle('active', mode === 'duo');
     this.hud.setMode(mode);
+    /*
+     * Reaching the menu has to be total. `returnToMenu()` used to be the only
+     * place that cleared the pause overlay, and it is not the only way in — the
+     * `setState('menu')` test hook calls straight through here, and so does a
+     * mode switch. A `.visible` pause overlay left behind has `pointer-events:
+     * auto` and swallows every click on the start panel, which reads as "the
+     * menu is frozen".
+     */
+    this.closeHelp();
+    this.paused = false;
+    this.overlayPause.classList.remove('visible');
+    this.overlayPause.style.display = 'none';
     this.finishShown = false;
     this.resetRace(true);
     this.hud.showStart();
@@ -846,6 +980,7 @@ export class Game {
   private async beginRace(): Promise<void> {
     this.finishShown = false;
     this.paused = false;
+    this.closeHelp();
     this.overlayPause.style.display = 'none';
     this.overlayPause.classList.remove('visible');
     this.savedBestThisRace = null;
@@ -857,6 +992,10 @@ export class Game {
     this.phase = 'countdown';
     this.countdownTimer = COUNTDOWN_SECONDS;
     this.lastCountdownLabel = '';
+    // Coaching is armed here rather than in resetRace, because resetRace also
+    // runs on every menu entry — and the menu is not a race.
+    this.coachStep = this.settings.coachDone ? 0 : 1;
+    this.renderCoach();
     try {
       await this.audio.unlock();
       this.audio.setMuted(this.settings.muted);
@@ -955,6 +1094,8 @@ export class Game {
     this.audio.updateEngine(Math.min(1, p1.speed / 55), p1.isBoosting);
     this.updateSpeedLines(p1.speed, p1.isBoosting, p1.isDrifting);
     this.updateOffTrackHelp(delta, p1.offTrack, p1.speed);
+    this.updateWrongWay(delta, raceActive);
+    this.updateCoach(delta, raceActive);
 
     // Rank-change flash
     const rankNow = this.rankOf(this.player1);
@@ -1002,6 +1143,8 @@ export class Game {
   ): void {
     const prevProgress = which === 1 ? this.prevProgressP1 : this.prevProgressP2;
     const canControl = raceActive && !player.kart.state.finished;
+    // Only P1 owns the alert column; in duo the second half has no room for it.
+    if (which === 1) this.updateInputFeedback(input, canControl);
 
     // One-key return to track (R / touch)
     if (canControl && input.reset) {
@@ -1054,7 +1197,10 @@ export class Game {
     }
     if (result.driftBoost > 0) {
       this.registerCombo('drift');
+      // Coaching step 3 retires here: the player has just felt the mini turbo.
+      if (which === 1) this.coachDriftBoost = true;
     }
+    if (which === 1 && result.nitroUsed) this.coachNitro = true;
 
     // Slipstream: draft behind another kart for a speed kick
     if (canControl && player.kart.state.speed > 16 && !player.kart.state.isBoosting) {
@@ -1178,6 +1324,19 @@ export class Game {
     const isNewRecord = rank1 === 1 ? saveBest(this.trackId, this.raceTime) : false;
     this.savedBestThisRace = getBest(this.trackId);
 
+    /*
+     * Losing every race without knowing why is the point at which a new player
+     * puts the game down. There are two useful answers and which one to give
+     * depends on whether a knob is still left to turn: if the difficulty is not
+     * already on easy, that is the knob; if it is, the help sheet is.
+     */
+    const tip =
+      this.mode === 'solo' && rank1 === 4
+        ? this.settings.difficulty === 'easy'
+          ? '还是卡住？主菜单「怎么玩？」里有漂移与氮气的四步说明'
+          : '想更轻松？主菜单可以把 AI 难度调成「简单」'
+        : undefined;
+
     this.hud.showFinish({
       title: this.mode === 'duo' ? `${winner} 获胜！` : rank1 === 1 ? '冠军！' : `第 ${rank1} 名`,
       eyebrow: this.mode === 'duo' ? 'VERSUS COMPLETE' : rank1 === 1 ? 'CHAMPION' : 'RACE COMPLETE',
@@ -1187,6 +1346,7 @@ export class Game {
       bestLap: this.bestLap,
       trackBest: this.savedBestThisRace,
       newRecord: isNewRecord,
+      tip,
       duoSummary:
         this.mode === 'duo'
           ? `P1 第${rank1}名 · P2 第${rank2}名`
@@ -1441,6 +1601,20 @@ export class Game {
     this.comboCount = 0;
     this.comboTimer = 0;
     this.slipstreamToastCooldown = 0;
+    // Alerts belong to a race, not to the menu: a toast left over from the last
+    // run would otherwise sit on top of the start panel.
+    this.hud.hideAction();
+    this.hud.setWrongWay(false);
+    this.hud.setCoach(null);
+    this.wrongWayTimer = 0;
+    this.wrongWayShown = false;
+    this.lastNitroDown = false;
+    this.lastDriftDown = false;
+    this.coachStep = 0;
+    this.coachPinned = false;
+    this.coachElapsed = 0;
+    this.coachDriftBoost = false;
+    this.coachNitro = false;
     this.player1.resetDriftScore();
     this.player2.resetDriftScore();
     this.items.build(this.track);
@@ -1657,6 +1831,145 @@ export class Game {
     if (visible !== this.lastOffTrackHelpVisible) {
       this.offtrackHelp.classList.toggle('visible', visible);
       this.lastOffTrackHelpVisible = visible;
+    }
+  }
+
+  /**
+   * "You are driving the wrong way."
+   *
+   * A new player who spins out on a wall bounce has no way to tell which way the
+   * road goes: the chase camera follows the kart, not the track, so the frame
+   * looks much the same in both directions. The dot product of the kart's
+   * heading against the tangent at its own progress is the cheapest reliable
+   * answer, and the debounce is what keeps it honest — a bounce swings the
+   * heading through 180 degrees and back within a few frames, and a warning that
+   * flickers on every scrape is noise rather than information.
+   *
+   * P1 only. In duo the second half of the split screen has no room for it, and
+   * a warning drawn in one player's half reads as that player's fault.
+   */
+  private updateWrongWay(delta: number, raceActive: boolean): void {
+    const p1 = this.player1.kart.state;
+    let visible = false;
+    if (raceActive && !p1.finished && p1.speed > 4) {
+      const sample = this.track.sampleAt(p1.progress);
+      const dot =
+        Math.sin(p1.heading) * sample.tangent.x + Math.cos(p1.heading) * sample.tangent.z;
+      if (dot < WRONG_WAY_DOT) this.wrongWayTimer += delta;
+      else this.wrongWayTimer = 0;
+      visible = this.wrongWayTimer > WRONG_WAY_DEBOUNCE;
+    } else {
+      this.wrongWayTimer = 0;
+    }
+    if (visible === this.wrongWayShown) return;
+    this.wrongWayShown = visible;
+    this.hud.setWrongWay(visible);
+    if (visible) this.audio.countdownBeep(false);
+  }
+
+  /**
+   * First-race coaching: the four actions that a controls list cannot teach, in
+   * the order they are needed. Each step retires on the action it names, so the
+   * sequence is driven by what the player does — someone who works it out in ten
+   * seconds is done in ten seconds — and the whole thing retires for good once
+   * all four are done, which is written back to settings.
+   */
+  private updateCoach(delta: number, raceActive: boolean): void {
+    if (this.coachPinned) {
+      this.renderCoach();
+      return;
+    }
+    if (this.coachStep <= 0) return;
+    if (this.phase === 'finished') {
+      this.retireCoach();
+      return;
+    }
+    if (this.phase === 'countdown') {
+      // Step 1 is the one instruction worth having before the lights change.
+      this.renderCoach();
+      return;
+    }
+    if (!raceActive) return;
+
+    const p1 = this.player1.kart.state;
+    this.coachElapsed += delta;
+    if (this.coachStep === 1 && p1.speed > MIN_SPEED_TO_DRIFT) this.coachStep = 2;
+    else if (this.coachStep === 2 && p1.isDrifting) this.coachStep = 3;
+    else if (this.coachStep === 3 && this.coachDriftBoost) this.coachStep = 4;
+    else if (this.coachStep === 4 && this.coachNitro) this.coachStep = COACH_STEPS.length + 1;
+
+    if (this.coachStep > COACH_STEPS.length || this.coachElapsed > COACH_TIMEOUT_SECONDS) {
+      this.retireCoach();
+      return;
+    }
+    this.renderCoach();
+  }
+
+  private renderCoach(): void {
+    if (this.coachStep <= 0 || this.coachStep > COACH_STEPS.length) {
+      this.hud.setCoach(null);
+      return;
+    }
+    const step = COACH_STEPS[this.coachStep - 1];
+    this.hud.setCoach(
+      this.hud.isTouchLayout ? step.touch : step.keyboard,
+      this.coachStep,
+      COACH_STEPS.length,
+    );
+  }
+
+  private retireCoach(): void {
+    this.coachStep = 0;
+    this.coachPinned = false;
+    this.hud.setCoach(null);
+    if (this.settings.coachDone) return;
+    this.settings.coachDone = true;
+    saveSettings(this.settings);
+  }
+
+  /**
+   * Explains the three inputs the physics drops on the floor.
+   *
+   * Pressing 氮气 with an empty tank, holding 漂移 below 12 m/s or without
+   * steering, and pressing 道具 with no item are all silent no-ops — from the
+   * driver's seat that is indistinguishable from a dead button. Each message is
+   * edge-triggered on the player's own press: one that appeared because the game
+   * *checked* would nag, one that appears because the player *asked* is an
+   * answer. Same for the stun, which swallows every input for up to 1.1s.
+   */
+  private updateInputFeedback(input: RaceInputFrame, canControl: boolean): void {
+    const nitroPressed = input.nitro && !this.lastNitroDown;
+    const driftPressed = input.drift && !this.lastDriftDown;
+    this.lastNitroDown = input.nitro;
+    this.lastDriftDown = input.drift;
+
+    if (!canControl || this.phase !== 'racing') return;
+    if (!nitroPressed && !driftPressed && !input.useItem) return;
+
+    const state = this.player1.kart.state;
+    if (this.player1.isStunned()) {
+      this.hud.showAction('刚被击中 · 车还在打转，稍等一下', 'warn');
+      return;
+    }
+    if (nitroPressed && !state.isBoosting && state.nitro <= 0.05) {
+      this.hud.showAction('氮气是空的 · 漂移可以给它充能', 'warn');
+      return;
+    }
+    if (driftPressed && !state.isDrifting) {
+      if (state.speed <= MIN_SPEED_TO_DRIFT) {
+        this.hud.showAction(
+          `先加速到 ${Math.round(MIN_SPEED_TO_DRIFT * 3.6)} km/h 再按漂移`,
+          'warn',
+        );
+        return;
+      }
+      if (Math.abs(input.steer) <= MIN_STEER_TO_DRIFT) {
+        this.hud.showAction('漂移要同时按住左 / 右转向', 'warn');
+        return;
+      }
+    }
+    if (input.useItem && !this.player1.getItem()) {
+      this.hud.showAction('还没有道具 · 穿过发光的道具箱获得', 'warn');
     }
   }
 
@@ -2003,6 +2316,74 @@ export class Game {
         this.renderer.setRenderTarget(previousTarget);
         return { calls, triangles, geometries: info.memory.geometries };
       },
+      /** Arms the first-race coaching without waiting out the 3.4s countdown. */
+      armCoach: () => {
+        this.coachPinned = false;
+        this.coachStep = 1;
+        this.coachElapsed = 0;
+        this.coachDriftBoost = false;
+        this.coachNitro = false;
+        this.renderCoach();
+        return { step: this.coachStep };
+      },
+      /**
+       * Holds one coaching step on screen. The wording is the part worth
+       * asserting — the advance rules need real drifting, which is not
+       * reproducible in a browser that renders at ~1 fps — so this pins the
+       * state machine and lets the text be read for each of the four steps.
+       */
+      setCoachStep: (n: number) => {
+        if (n <= 0) {
+          // Same path the state machine takes on completion, so the persistence
+          // write is exercised rather than stubbed.
+          this.retireCoach();
+          return { step: this.coachStep };
+        }
+        this.coachPinned = true;
+        this.coachStep = n;
+        this.renderCoach();
+        return { step: this.coachStep };
+      },
+      setCoachDone: (done: boolean) => {
+        this.settings.coachDone = done;
+        saveSettings(this.settings);
+        return { coachDone: this.settings.coachDone };
+      },
+      /**
+       * Turns the kart around without touching the physics. Driving a lap
+       * backwards to reach the wrong-way warning is not reproducible headless.
+       */
+      faceBackwards: () => {
+        const s = this.player1.kart.state;
+        s.heading += Math.PI;
+        s.speed = 20;
+        this.player1.kart.syncTransform(0);
+        return { heading: s.heading };
+      },
+      /**
+       * Finishes with P1 last. `setState('complete')` is built around winning —
+       * it puts the AI two seconds back — so the results panel's advice line,
+       * which only exists for a last-place finish, cannot be reached through it.
+       */
+      finishLast: () => {
+        window.__THREE_GAME_TEST_HOOKS__?.setState('complete');
+        this.finishShown = false;
+        this.phase = 'finished';
+        for (const ai of this.ais) ai.kart.state.finishTime = this.raceTime - 6;
+        this.finishRace();
+        this.updateHud();
+        this.render();
+        this.publishDiagnostics();
+        return { rank: this.rankOf(this.player1) };
+      },
+      openHelp: () => {
+        this.openHelp();
+        return { open: this.helpOpen };
+      },
+      closeHelp: () => {
+        this.closeHelp();
+        return { open: this.helpOpen };
+      },
       hideDebugUi: (_hidden: boolean) => {
         // no-op
       },
@@ -2051,6 +2432,12 @@ export class Game {
       },
       get reducedMotion() {
         return game.reducedMotion;
+      },
+      get coach() {
+        return { step: game.coachStep, done: game.settings.coachDone };
+      },
+      get helpOpen() {
+        return game.helpOpen;
       },
       get vfxLive() {
         return game.vfx.live;

@@ -116,6 +116,18 @@ type BodyGeometries = {
   tailStrip: THREE.BufferGeometry;
   headlights: THREE.BufferGeometry;
   tailLamps: THREE.BufferGeometry;
+  /** Bright emissive bar along the hood centerline. Sits on its own material
+   *  because the accent trim's emissiveIntensity (0.22) is too soft to read
+   *  as an LED, and bumping the accent up would also brighten the splitter,
+   *  skirts and wing beyond what bloom can carry. */
+  ledStrip: THREE.BufferGeometry;
+  /** Thin emissive strip along each side skirt — always on, gives an idle glow
+   *  even when the ground decal (drift/boost only) is hidden. */
+  underbodyGlow: THREE.BufferGeometry;
+  /** Additive halo quads in front of the headlights. Unlit, so they neither
+   *  join the lighting loop nor bloat the shader cache; their job is purely to
+   *  feed the bloom pass a soft white pool. */
+  headlightHalo: THREE.BufferGeometry;
 };
 
 type WheelGeometries = {
@@ -136,20 +148,73 @@ type KartGeometries = {
 let geometryCache: KartGeometries | null = null;
 
 function buildBodyGeometries(): BodyGeometries {
+  // The old version of this function used 8 box primitives per kart and read
+  // as a Lego: a square black cabin, a thin glass slab, a half-torus roll hoop
+  // floating above the body, two wing struts that didn't reach the wing, and a
+  // nose that ended in a blunt 90° face. The shape now follows a few F1-kart
+  // cues: a tapered nose tip, a windshield-tilted canopy, a low-profile roll
+  // hoop behind the cockpit, a real airfoil tilted at -0.18 rad, a three-fin
+  // rear diffuser, side air intakes with a darker inset, and a single LED strip
+  // running along the hood centerline. Brighter idle lighting comes from a thin
+  // accent strip on each side skirt; the headlights get a soft additive halo
+  // so the bloom pass picks them up instead of just two white pixels.
   return {
     paint: mergeParts([
+      // Lower chassis pan — the slab everything else sits on.
       { geo: new THREE.BoxGeometry(BODY_WIDTH, 0.28, BODY_LENGTH), pos: [0, 0.42, 0] },
+      // Upper hull — narrower and shorter than the pan, set slightly forward.
       {
         geo: new THREE.BoxGeometry(BODY_WIDTH * 0.9, 0.22, BODY_LENGTH * 0.62),
         pos: [0, 0.62, -0.08],
       },
+      // Tapered nose tip — shorter than the upper hull and lower, so the
+      // silhouette drops cleanly to the splitter instead of hitting a 90° face.
+      {
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 0.62, 0.16, 0.55),
+        pos: [0, 0.36, BODY_LENGTH * 0.6],
+      },
+      // Fender flares — a half-torus arch standing over each wheel. This is
+      // the single biggest silhouette change in the pass: without them the
+      // body was a bare slab with four wheels poking out of the sides, which
+      // is what made it read as a toy. TorusGeometry lies in the XY plane by
+      // default, so the arc runs +X → -X over +Y; rotating +90° about Y maps
+      // that to +Z → -Z over +Y, i.e. an arch spanning the wheel fore-to-aft.
+      // Radius 0.42 / tube 0.06 clears the 0.30 wheel by 0.06 — at 0.46/0.075
+      // the arches floated 0.17 above the tyre and read as loose tubing.
+      {
+        geo: new THREE.TorusGeometry(0.42, 0.06, 8, 18, Math.PI),
+        pos: [-0.62, 0.28, 0.78],
+        rot: [0, Math.PI / 2, 0],
+      },
+      {
+        geo: new THREE.TorusGeometry(0.42, 0.06, 8, 18, Math.PI),
+        pos: [0.62, 0.28, 0.78],
+        rot: [0, Math.PI / 2, 0],
+      },
+      {
+        geo: new THREE.TorusGeometry(0.42, 0.06, 8, 18, Math.PI),
+        pos: [-0.66, 0.28, -0.68],
+        rot: [0, Math.PI / 2, 0],
+      },
+      {
+        geo: new THREE.TorusGeometry(0.42, 0.06, 8, 18, Math.PI),
+        pos: [0.66, 0.28, -0.68],
+        rot: [0, Math.PI / 2, 0],
+      },
     ]),
     accent: mergeParts([
+      // Splitter lip — the front splitter itself is carbon now (see below);
+      // only this 3cm leading-edge strip stays accent, which is what makes it
+      // read as a lit edge rather than a glowing wedge. The old accent
+      // splitter was a 0.78×0.14×0.58 slab facing up at -0.1 rad, so it caught
+      // the key light *and* carried 0.22 emissive — under bloom it blew out to
+      // a flat white wedge in every front shot.
       {
-        geo: new THREE.BoxGeometry(BODY_WIDTH * 0.78, 0.14, 0.58),
-        pos: [0, 0.38, BODY_LENGTH * 0.55],
-        rot: [-0.1, 0, 0],
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 1.0, 0.03, 0.07),
+        pos: [0, 0.21, BODY_LENGTH * 0.5 + 0.29],
+        rot: [-0.08, 0, 0],
       },
+      // Side skirts (kept — these are the slim accent bars down each flank).
       {
         geo: new THREE.BoxGeometry(0.06, 0.05, BODY_LENGTH * 0.5),
         pos: [-BODY_WIDTH * 0.48 - 0.1, 0.42, -0.1],
@@ -158,21 +223,46 @@ function buildBodyGeometries(): BodyGeometries {
         geo: new THREE.BoxGeometry(0.06, 0.05, BODY_LENGTH * 0.5),
         pos: [BODY_WIDTH * 0.48 + 0.1, 0.42, -0.1],
       },
+      // (Hood LED strip moved to its own geometry/material so it can have a
+      //  higher emissive intensity without dragging the splitter, skirts, and
+      //  wing up with it.)
+      // Rear wing — was a flat slab, now a tilted airfoil. Endplates sit just
+      // outside the wing tips and read as the wing's vertical seals.
       {
-        geo: new THREE.TorusGeometry(0.42, 0.04, 8, 20, Math.PI),
-        pos: [0, 0.92, 0.05],
-        rot: [-Math.PI / 2, 0, 0],
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 1.18, 0.05, 0.34),
+        pos: [0, 1.04, -BODY_LENGTH * 0.46],
+        rot: [-0.18, 0, 0],
       },
       {
-        geo: new THREE.BoxGeometry(BODY_WIDTH * 1.15, 0.06, 0.32),
-        pos: [0, 1.0, -BODY_LENGTH * 0.46],
+        geo: new THREE.BoxGeometry(0.05, 0.18, 0.32),
+        pos: [-BODY_WIDTH * 0.58, 1.04, -BODY_LENGTH * 0.46],
+      },
+      {
+        geo: new THREE.BoxGeometry(0.05, 0.18, 0.32),
+        pos: [BODY_WIDTH * 0.58, 1.04, -BODY_LENGTH * 0.46],
+      },
+      // Roll hoop. The original was a 0.42-radius π-torus rotated
+      // `[-π/2, 0, 0]`, which lays the ring FLAT — so it was a horizontal
+      // half-ring hovering over the body, and it read as a carry handle, not a
+      // roll bar. A hoop has to stand up: no X rotation, so the arc runs
+      // +X → -X over +Y, straddling the cockpit. Radius 0.32 spans 0.64,
+      // just wider than the 0.56 canopy, and the 0.8 base height puts the
+      // crown at 1.12 — 0.13 above the canopy.
+      {
+        geo: new THREE.TorusGeometry(0.32, 0.032, 8, 20, Math.PI),
+        pos: [0, 0.8, -0.42],
       },
     ]),
     carbon: mergeParts([
+      // Front splitter — the main plate. Moved here from the accent group: a
+      // dark splitter with a thin lit lip (above) looks like real aero, where
+      // an all-accent splitter looked like a glowing plank.
       {
-        geo: new THREE.BoxGeometry(BODY_WIDTH * 1.05, 0.06, 0.5),
-        pos: [0, 0.22, BODY_LENGTH * 0.48],
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 1.05, 0.07, 0.6),
+        pos: [0, 0.24, BODY_LENGTH * 0.5],
+        rot: [-0.08, 0, 0],
       },
+      // Lower side skirts — keep these as the dark base under the accent bars.
       {
         geo: new THREE.BoxGeometry(0.22, 0.2, BODY_LENGTH * 0.55),
         pos: [-BODY_WIDTH * 0.48, 0.32, -0.1],
@@ -181,32 +271,111 @@ function buildBodyGeometries(): BodyGeometries {
         geo: new THREE.BoxGeometry(0.22, 0.2, BODY_LENGTH * 0.55),
         pos: [BODY_WIDTH * 0.48, 0.32, -0.1],
       },
+      // Rear deck — wider carbon panel behind the cockpit (kept).
       {
         geo: new THREE.BoxGeometry(BODY_WIDTH * 0.95, 0.16, 0.35),
         pos: [0, 0.28, -BODY_LENGTH * 0.48],
       },
+      // Engine cover — thin panel under the rear wing (kept).
       {
         geo: new THREE.BoxGeometry(BODY_WIDTH * 0.9, 0.05, 0.2),
         pos: [0, 0.72, -BODY_LENGTH * 0.5],
       },
-      { geo: new THREE.BoxGeometry(0.06, 0.34, 0.08), pos: [-0.45, 0.82, -BODY_LENGTH * 0.46] },
-      { geo: new THREE.BoxGeometry(0.06, 0.34, 0.08), pos: [0.45, 0.82, -BODY_LENGTH * 0.46] },
+      // Rear diffuser — three vertical fins below the rear deck. The center
+      // fin is wider; the outer two step back slightly so the silhouette
+      // tapers like a real diffuser rather than a flat wall.
+      {
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 0.92, 0.14, 0.018),
+        pos: [0, 0.18, -BODY_LENGTH * 0.5],
+      },
+      {
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 0.7, 0.12, 0.015),
+        pos: [-BODY_WIDTH * 0.18, 0.2, -BODY_LENGTH * 0.535],
+      },
+      {
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 0.7, 0.12, 0.015),
+        pos: [BODY_WIDTH * 0.18, 0.2, -BODY_LENGTH * 0.535],
+      },
     ]),
-    dark: mergeParts([{ geo: new THREE.BoxGeometry(0.72, 0.26, 0.85), pos: [0, 0.8, 0.05] }]),
-    glass: mergeParts([{ geo: new THREE.BoxGeometry(0.58, 0.1, 0.4), pos: [0, 0.95, 0.3] }]),
+    dark: mergeParts([
+      // Cockpit shell — flatter than the old 0.26-tall block so the canopy
+      // can sit on top of it without overlapping.
+      { geo: new THREE.BoxGeometry(0.72, 0.16, 0.85), pos: [0, 0.74, 0.05] },
+      // Driver helmet hint — a low-poly sphere inside the canopy. At 0.10
+      // radius it reads as a head shape without modelling a face.
+      { geo: new THREE.SphereGeometry(0.1, 14, 10), pos: [0, 0.86, 0.14] },
+      // Side air intakes — slim carbon-look boxes hugging the cockpit. The
+      // inset face is the same material so they show as a notch, not a slot.
+      { geo: new THREE.BoxGeometry(0.04, 0.16, 0.5), pos: [-BODY_WIDTH * 0.42, 0.62, 0.05] },
+      { geo: new THREE.BoxGeometry(0.04, 0.16, 0.5), pos: [BODY_WIDTH * 0.42, 0.62, 0.05] },
+    ]),
+    glass: mergeParts([
+      // The old canopy was a 0.58×0.1×0.4 slab that read as a thin lid. This
+      // one is tilted forward 0.12 rad so the front face acts as a windshield.
+      // Trimmed from 0.6×0.24×0.86 to 0.56×0.2×0.8 — at the larger size it
+      // looked like a glass brick parked on the hull rather than a cockpit.
+      {
+        geo: new THREE.BoxGeometry(0.56, 0.2, 0.8),
+        pos: [0, 0.89, 0.0],
+        rot: [-0.12, 0, 0],
+      },
+    ]),
     tailStrip: mergeParts([
       {
         geo: new THREE.BoxGeometry(BODY_WIDTH * 0.85, 0.04, 0.05),
         pos: [0, 0.5, -BODY_LENGTH * 0.52],
       },
     ]),
+    ledStrip: mergeParts([
+      // Hood centerline LED — 6cm wide and 2cm tall, emissive at 1.2 with the
+      // livery accent. Sits flush with the top of the upper hull.
+      {
+        geo: new THREE.BoxGeometry(0.06, 0.02, BODY_LENGTH * 0.42),
+        pos: [0, 0.74, 0.05],
+      },
+    ]),
     headlights: mergeParts([
-      { geo: new THREE.BoxGeometry(0.22, 0.07, 0.06), pos: [-0.28, 0.42, BODY_LENGTH * 0.7] },
-      { geo: new THREE.BoxGeometry(0.22, 0.07, 0.06), pos: [0.28, 0.42, BODY_LENGTH * 0.7] },
+      // Pulled forward onto the nose tip so they sit on the wedge face, not
+      // behind it.
+      { geo: new THREE.BoxGeometry(0.16, 0.05, 0.05), pos: [-0.24, 0.4, BODY_LENGTH * 0.65] },
+      { geo: new THREE.BoxGeometry(0.16, 0.05, 0.05), pos: [0.24, 0.4, BODY_LENGTH * 0.65] },
     ]),
     tailLamps: mergeParts([
       { geo: new THREE.BoxGeometry(0.16, 0.05, 0.04), pos: [-0.36, 0.48, -BODY_LENGTH * 0.5] },
       { geo: new THREE.BoxGeometry(0.16, 0.05, 0.04), pos: [0.36, 0.48, -BODY_LENGTH * 0.5] },
+    ]),
+    underbodyGlow: mergeParts([
+      // Two slim emissive strips below the body line. They are always on (not
+      // drift/boost gated) so the kart has a permanent soft accent at idle.
+      {
+        geo: new THREE.BoxGeometry(0.018, 0.022, BODY_LENGTH * 0.5),
+        pos: [-BODY_WIDTH * 0.48 - 0.13, 0.16, -0.08],
+      },
+      {
+        geo: new THREE.BoxGeometry(0.018, 0.022, BODY_LENGTH * 0.5),
+        pos: [BODY_WIDTH * 0.48 + 0.13, 0.16, -0.08],
+      },
+      // Short underglow under the nose so the front end reads as lit too.
+      {
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 0.6, 0.018, 0.018),
+        pos: [0, 0.14, BODY_LENGTH * 0.46],
+      },
+    ]),
+    headlightHalo: mergeParts([
+      // Halo geometry has shrunk three times during the beautify pass. v1 was
+      // 0.42×0.22 and additive at opacity 0.55 — the bloom pass picked up
+      // both halos and merged them into a single white slab that covered the
+      // front of the kart. 0.26×0.10 at opacity 0.22 sits tight around the
+      // headlight box, the planes are 0.32 apart on X (no overlap), and the
+      // bloom contribution drops below the visual-saturation threshold.
+      {
+        geo: new THREE.PlaneGeometry(0.2, 0.08),
+        pos: [-0.24, 0.4, BODY_LENGTH * 0.68],
+      },
+      {
+        geo: new THREE.PlaneGeometry(0.2, 0.08),
+        pos: [0.24, 0.4, BODY_LENGTH * 0.68],
+      },
     ]),
   };
 }
@@ -512,13 +681,22 @@ export class Kart {
     );
     const glassMat = this.track(
       new THREE.MeshPhysicalMaterial({
-        color: '#8ad4ff',
-        roughness: 0.04,
-        metalness: 0.15,
-        transmission: 0.65,
-        transparent: true,
-        opacity: 0.9,
-        thickness: 0.2,
+        // Dark smoked canopy instead of the old milky `#8ad4ff` at opacity
+        // 0.9. Stacking a bright base colour, `transparent: true`, AND
+        // `transmission` is what made the canopy read as frosted plastic: the
+        // opacity blend whitened whatever was behind it while the transmission
+        // pass tried to refract the same pixels. A dark tint with transmission
+        // near 1 and `transparent: false` lets the refraction do all the work,
+        // so the canopy darkens its contents instead of washing them out.
+        color: '#16303f',
+        roughness: 0.06,
+        metalness: 0,
+        transmission: 0.92,
+        transparent: false,
+        thickness: 0.35,
+        ior: 1.45,
+        attenuationColor: '#1d4a63',
+        attenuationDistance: 1.4,
       }),
     );
     const stripMat = this.track(
@@ -529,8 +707,48 @@ export class Kart {
         roughness: 0.4,
       }),
     );
+    // Hood LED material — emissive at 1.2 with the livery accent. The gold
+    // livery (#ffd166, luminance ~0.86) clears the 0.72 bloom threshold at
+    // intensity 1.0 already, so the LED bar blooms even without a halo. The
+    // other liveries need this level to read as lit at all.
+    const ledStripMat = this.track(
+      new THREE.MeshStandardMaterial({
+        color: this.config.accent,
+        emissive: this.config.accent,
+        emissiveIntensity: 1.2,
+        roughness: 0.3,
+      }),
+    );
     const lampMat = this.track(new THREE.MeshBasicMaterial({ color: '#eefcff' }));
     const tailMat = this.track(new THREE.MeshBasicMaterial({ color: '#ff2a6d' }));
+    // The idle underbody strip is plain (no additive, no emissive) so it
+    // reads as a painted accent rather than feeding the bloom pass. The gold
+    // livery (#ffd166) already clears the 0.72 bloom threshold on its own;
+    // pushing more luminance there would blow out the surrounding pixels.
+    const underbodyMat = this.track(
+      new THREE.MeshBasicMaterial({
+        color: this.config.accent,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+      }),
+    );
+    // Headlight halos *should* bloom — that is the entire point of them —
+// so additive with a soft alpha and no depth write. Opacity 0.22 keeps
+// the two halos from merging into one slab via the bloom pass (threshold
+// 0.72, radius 0.42): each plane alone contributes 0.22 to the pixel, well
+// under saturation. A faint cool tint instead of #ffffff reads as "lit" and
+// matches the headlight box's #eefcff.
+const headlightHaloMat = this.track(
+  new THREE.MeshBasicMaterial({
+    color: '#ddeeff',
+    transparent: true,
+    opacity: 0.22,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  }),
+);
 
     const shell = new THREE.Mesh(geometries.paint, paint);
     shell.castShadow = true;
@@ -544,8 +762,11 @@ export class Kart {
     group.add(new THREE.Mesh(geometries.dark, darkMat));
     group.add(new THREE.Mesh(geometries.glass, glassMat));
     group.add(new THREE.Mesh(geometries.tailStrip, stripMat));
+    group.add(new THREE.Mesh(geometries.ledStrip, ledStripMat));
     group.add(new THREE.Mesh(geometries.headlights, lampMat));
     group.add(new THREE.Mesh(geometries.tailLamps, tailMat));
+    group.add(new THREE.Mesh(geometries.underbodyGlow, underbodyMat));
+    group.add(new THREE.Mesh(geometries.headlightHalo, headlightHaloMat));
 
     return group;
   }

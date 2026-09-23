@@ -38,7 +38,13 @@ export const PLAYER_TUNING: KartTuning = {
   boostPadDuration: 1.4,
 };
 
-const MIN_SPEED_TO_DRIFT = 12;
+/**
+ * Exported so the HUD can explain a rejected drift with the same number the
+ * physics actually tests, instead of a copy that drifts out of sync.
+ */
+export const MIN_SPEED_TO_DRIFT = 12;
+/** `canDrift` also requires this much steering input — see `update()`. */
+export const MIN_STEER_TO_DRIFT = 0.12;
 const NITRO_MAX = 1;
 
 export type DriftBoostLevel = 0 | 1 | 2 | 3;
@@ -145,6 +151,15 @@ export class PlayerRacer {
     return this.driftCharge;
   }
 
+  /**
+   * While stunned the kart ignores throttle, steering, drift, nitro and items
+   * outright — which, without a readout, is indistinguishable from a broken
+   * controller. The HUD says so instead of leaving the player to guess.
+   */
+  isStunned(): boolean {
+    return this.stunTimer > 0;
+  }
+
   getDriftScore(): number {
     return Math.floor(this.driftScore);
   }
@@ -248,7 +263,8 @@ export class PlayerRacer {
     }
 
     // Drift store — hold drift to charge, release for a mini turbo
-    const canDrift = wantDrift && state.speed > MIN_SPEED_TO_DRIFT && Math.abs(steer) > 0.12;
+    const canDrift =
+      wantDrift && state.speed > MIN_SPEED_TO_DRIFT && Math.abs(steer) > MIN_STEER_TO_DRIFT;
     let driftBoost: DriftBoostLevel = 0;
     if (canDrift && !state.isDrifting) {
       state.isDrifting = true;

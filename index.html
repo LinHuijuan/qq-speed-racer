@@ -108,10 +108,39 @@
               <div class="item-slot" id="item-slot">
                 <span id="item-icon">?</span>
               </div>
-              <div class="item-label">
-                <span class="hint-keyboard">按 <kbd>E</kbd> 使用</span>
-                <span class="hint-touch">点 道具 键使用</span>
+              <!--
+                Two wordings per layout, not one: "press E to use" is a lie while
+                the slot is empty, and an empty slot is the state a new player
+                spends the whole first lap in. The cluster carries `has-item` so
+                the pair swaps together with the slot's own empty/filled look.
+              -->
+              <div class="item-label" id="item-label">
+                <span class="item-label-empty">穿过发光箱获得</span>
+                <span class="item-label-use hint-keyboard">按 <kbd>E</kbd> 使用</span>
+                <span class="item-label-use hint-touch">点 道具 键使用</span>
               </div>
+            </div>
+          </div>
+
+          <!--
+            One column for every transient message, anchored above .hud-bottom
+            rather than to a viewport offset: .hud-bottom is absolutely
+            positioned, so it is the containing block and `bottom: 100%` keeps
+            the column clear of the clusters however tall they grow (134px on
+            desktop, 231px in portrait). Stacking them in a flex column means
+            two messages can never land on top of each other. Children are
+            display:none until they carry .visible, so a hidden alert does not
+            reserve a slot and shift the ones below it.
+          -->
+          <div id="hud-alerts" aria-live="polite">
+            <div id="wrong-way" class="alert alert-danger" role="status">
+              <span class="alert-icon" aria-hidden="true">↩</span>
+              <span>逆行 · 请掉头</span>
+            </div>
+            <div id="action-toast" class="alert alert-hint" role="status"></div>
+            <div id="coach-hint" class="alert alert-coach" role="status">
+              <span class="alert-badge" id="coach-step"></span>
+              <span id="coach-text"></span>
             </div>
           </div>
         </div>
@@ -165,7 +194,19 @@
 
       <div id="overlay-start" class="overlay visible">
         <div class="panel">
-          <p class="eyebrow">NEON CIRCUIT</p>
+          <!--
+            The help entry lives on the eyebrow line rather than as its own row.
+            Every vertical pixel this panel spends is taken off the slack between
+            开始比赛 and the fold (desktop slack was 41px, and it has already been
+            pushed to 1px once by a card growing 12px), so the one entry point a
+            new player needs has to cost zero height. `.ghost-btn` is a two-class
+            selector on purpose: it sits inside a <p>, so `.panel button` (0,1,1)
+            would otherwise repaint it as a primary gradient pill.
+          -->
+          <p class="eyebrow">
+            <span>NEON CIRCUIT</span>
+            <button type="button" id="help-button" class="ghost-btn">怎么玩？</button>
+          </p>
           <h1>极速漂移</h1>
           <p class="lead">漂移蓄能 · 氮气爆发 · 三圈夺冠</p>
           <div class="mode-select">
@@ -278,7 +319,58 @@
           <button id="resume-button" type="button">继续比赛</button>
           <button id="pause-restart-button" type="button" class="secondary-btn">重新开始</button>
           <button id="pause-menu-button" type="button" class="secondary-btn">返回主菜单</button>
-          <p class="hint"><span class="hint-keyboard">按 <kbd>Esc</kbd> 暂停/继续</span><span class="hint-touch">点「继续比赛」回到赛道</span></p>
+          <!--
+            Inline in the hint line rather than a fourth pill: the pause panel is
+            a three-row grid in landscape and every extra row comes off the
+            resume button's clearance above the fold.
+          -->
+          <p class="hint">
+            <span class="hint-keyboard">按 <kbd>Esc</kbd> 暂停/继续</span>
+            <span class="hint-touch">点「继续比赛」回到赛道</span>
+            <button type="button" id="pause-help-button" class="ghost-btn">怎么玩？</button>
+          </p>
+        </div>
+      </div>
+
+      <!--
+        The four things a first-time player has to be told, in one place they
+        can re-open at any time. Wording is split per layout: the menu's controls
+        list already swaps its key names for on-screen button names on a touch
+        device, and a help screen that still says "Shift" on a phone is the
+        exact failure that swap exists to prevent.
+      -->
+      <div id="overlay-help" class="overlay">
+        <div class="panel">
+          <p class="eyebrow">HOW TO PLAY</p>
+          <h2>四步上手</h2>
+          <ol class="help-steps">
+            <li>
+              <strong>踩油门</strong>
+              <span class="hint-keyboard">按住 <kbd>W</kbd>（或 <kbd>↑</kbd>）把车跑起来</span>
+              <span class="hint-touch">把左摇杆向前推，把车跑起来</span>
+            </li>
+            <li>
+              <strong>进弯漂移</strong>
+              <span class="hint-keyboard">按住 <kbd>Shift</kbd>，同时按 <kbd>A</kbd>/<kbd>D</kbd> 转向</span>
+              <span class="hint-touch">按住「漂移」键，同时把摇杆推向弯道那一侧</span>
+            </li>
+            <li>
+              <strong>松手小喷</strong>
+              <span>松开漂移键立刻换来一次加速 —— 漂得越久越快，最多三档</span>
+            </li>
+            <li>
+              <strong>氮气爆发</strong>
+              <span class="hint-keyboard">漂移同时给氮气充能，充满后按 <kbd>空格</kbd> 爆发</span>
+              <span class="hint-touch">漂移同时给氮气充能，充满后按「氮气」键爆发</span>
+            </li>
+          </ol>
+          <p class="help-note">
+            道具箱给随机道具：🚀 涡轮 · 🛡 护盾 · 🎯 导弹 · 💣 地雷。
+            <span class="hint-keyboard">冲出赛道按 <kbd>R</kbd> 一键回到赛道。</span>
+            <span class="hint-touch">冲出赛道点「回道」按钮。</span>
+          </p>
+          <button id="help-close-button" type="button">知道了</button>
+          <button id="help-coach-button" type="button" class="secondary-btn">重新开启新手引导</button>
         </div>
       </div>
 
