@@ -42,6 +42,8 @@ declare global {
         drifting?: boolean;
         boosting?: boolean;
         offTrack?: boolean;
+        /** Ground-glow opacity: 0 idle, >0 while drifting or boosting. */
+        glow?: number;
       };
       player2?: {
         position: { x: number; y: number; z: number };
@@ -54,6 +56,10 @@ declare global {
         triangles: number;
         geometries: number;
         textures: number;
+        /** Compiled shader programs — grows when the light counts change. */
+        programs?: number;
+        /** Lights currently reaching the shader (invisible ones are excluded). */
+        lights?: number;
       };
       canvas?: {
         clientWidth: number;

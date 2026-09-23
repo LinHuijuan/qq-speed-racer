@@ -1937,6 +1937,7 @@ export class Game {
           drifting: state.isDrifting,
           boosting: state.isBoosting,
           offTrack: state.offTrack,
+          glow: game.player1.kart.glowOpacity,
         };
       },
       get player2() {
@@ -1956,6 +1957,11 @@ export class Game {
           triangles: info.render.triangles,
           geometries: info.memory.geometries,
           textures: info.memory.textures,
+          // Shader variants are keyed on the light counts, so these two move
+          // together: a light appearing or disappearing recompiles every
+          // material that receives it.
+          programs: info.programs?.length ?? 0,
+          lights: game.countVisibleLights(),
         };
       },
       get canvas() {
@@ -1974,6 +1980,19 @@ export class Game {
   /** Cheap per-frame keep-alive: re-installs only if something cleared it. */
   private publishDiagnostics(): void {
     this.installDiagnostics();
+  }
+
+  /**
+   * Lights that actually reach the shader. three.js drops invisible ones from
+   * the light list, and the light counts are part of the program cache key — so
+   * toggling `visible` on a light is what forces a recompile.
+   */
+  private countVisibleLights(): number {
+    let count = 0;
+    this.scene.traverseVisible((object) => {
+      if ((object as THREE.Light).isLight) count += 1;
+    });
+    return count;
   }
 
   private getElement(selector: string): HTMLElement {

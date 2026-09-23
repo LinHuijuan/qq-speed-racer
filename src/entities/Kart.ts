@@ -32,6 +32,48 @@ const WHEEL_RADIUS = 0.3;
 const BODY_LENGTH = 2.35;
 const BODY_WIDTH = 1.2;
 
+/** Radius of the soft additive pool painted on the road under a kart. */
+const GROUND_GLOW_RADIUS = 1.9;
+/** Peak opacity of that pool. Additive, so this reads brighter than it sounds. */
+const GROUND_GLOW_OPACITY = 0.6;
+
+let glowTextureCache: THREE.Texture | null = null;
+
+/**
+ * Radial white-to-transparent falloff, built once and shared by every kart.
+ *
+ * This replaces a per-kart PointLight. The light had to be toggled `visible`
+ * with the drift state, and three.js drops invisible lights from the light list
+ * — but the light counts are part of the material program cache key, so every
+ * drift start/stop recompiled every lit material in the scene. Measured: the
+ * visible light count oscillated 7 <-> 8 and the compiled program count grew
+ * 60 -> 76 during a single drift. A MeshBasicMaterial decal is unlit, so it
+ * neither joins the lighting loop nor touches the program key.
+ */
+function glowTexture(): THREE.Texture {
+  if (glowTextureCache) return glowTextureCache;
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const half = size / 2;
+    const gradient = ctx.createRadialGradient(half, half, 0, half, half, half);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.45, 'rgba(255,255,255,0.5)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  // Additive blending multiplies by the map's alpha, so the falloff above is
+  // what keeps the pool soft instead of a hard-edged disc.
+  texture.colorSpace = THREE.SRGBColorSpace;
+  glowTextureCache = texture;
+  return texture;
+}
+
 /**
  * Parts are merged per material so one kart costs ~22 draw calls instead of ~55.
  * The local transforms below mirror the original per-mesh placement exactly, so
@@ -87,6 +129,8 @@ type KartGeometries = {
   /** Index 0 = front axle (slightly smaller), index 1 = rear axle. */
   wheels: [WheelGeometries, WheelGeometries];
   flame: THREE.BufferGeometry;
+  /** Two triangles lying flat — the additive pool under the kart. */
+  groundGlow: THREE.BufferGeometry;
 };
 
 let geometryCache: KartGeometries | null = null;
@@ -213,6 +257,7 @@ function kartGeometries(): KartGeometries {
     body: buildBodyGeometries(),
     wheels: [buildWheelGeometries(WHEEL_RADIUS * 0.96), buildWheelGeometries(WHEEL_RADIUS)],
     flame: new THREE.ConeGeometry(0.2, 1.5, 12),
+    groundGlow: new THREE.PlaneGeometry(GROUND_GLOW_RADIUS * 2, GROUND_GLOW_RADIUS * 2),
   };
   return geometryCache;
 }
@@ -247,7 +292,8 @@ export class Kart {
   private readonly body: THREE.Group;
   private readonly wheels: THREE.Mesh[] = [];
   private readonly boostFlames: THREE.Mesh[] = [];
-  private readonly driftGlow: THREE.PointLight;
+  private readonly groundGlow: THREE.Mesh;
+  private readonly groundGlowMaterial: THREE.MeshBasicMaterial;
   private readonly materials: THREE.Material[] = [];
   private readonly name: string;
   /** Accumulated simulation time for the flame flicker. Using the wall clock
@@ -315,14 +361,34 @@ export class Kart {
       this.group.add(flame);
     }
 
-    this.driftGlow = new THREE.PointLight(this.config.accent, 0, 5);
-    this.driftGlow.position.set(0, 0.5, 0);
-    this.driftGlow.visible = false;
-    this.group.add(this.driftGlow);
+    this.groundGlowMaterial = this.track(
+      new THREE.MeshBasicMaterial({
+        map: glowTexture(),
+        color: this.config.accent,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    this.groundGlow = new THREE.Mesh(geometries.groundGlow, this.groundGlowMaterial);
+    this.groundGlow.rotation.x = -Math.PI / 2;
+    // Just clear of the road surface, which sits at y = 0.
+    this.groundGlow.position.y = 0.04;
+    this.groundGlow.visible = false;
+    this.group.add(this.groundGlow);
   }
 
   get displayName(): string {
     return this.name;
+  }
+
+  /**
+   * Ground-glow opacity. 0 when idle, raised while drifting or boosting — the
+   * only externally visible part of the effect, and what the tests assert on.
+   */
+  get glowOpacity(): number {
+    return this.groundGlowMaterial.opacity;
   }
 
   reset(position: THREE.Vector3, heading: number): void {
@@ -373,18 +439,29 @@ export class Kart {
       );
     }
 
+    // Same intensity curve the PointLight used, expressed as decal opacity.
+    // Toggling a mesh's `visible` is free — unlike a light, a mesh is not part
+    // of the material program cache key, so this cannot trigger a recompile.
     const glowTarget = this.state.isDrifting
       ? 1.2 + Math.abs(this.state.driftAngle) * 0.8
       : boostStrength * 1.2;
-    this.driftGlow.visible = glowTarget > 0.05;
-    this.driftGlow.intensity = THREE.MathUtils.lerp(
-      this.driftGlow.intensity,
-      glowTarget,
+    const glowStrength = Math.min(glowTarget / 2, 1);
+    const material = this.groundGlowMaterial;
+    material.opacity = THREE.MathUtils.lerp(
+      material.opacity,
+      glowStrength * GROUND_GLOW_OPACITY,
       Math.min(1, delta * 10),
     );
+    this.groundGlow.visible = material.opacity > 0.01;
+    if (this.groundGlow.visible) {
+      this.groundGlow.scale.setScalar(0.85 + glowStrength * 0.3);
+    }
   }
 
-  /** Releases per-instance materials only — geometries are shared. */
+  /**
+   * Releases per-instance materials only. Geometries and the glow falloff
+   * texture are shared for the lifetime of the page, like `geometryCache`.
+   */
   dispose(): void {
     for (const material of this.materials) material.dispose();
     this.materials.length = 0;
