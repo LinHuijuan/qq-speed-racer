@@ -34,25 +34,54 @@ page.on('console', (m) => {
 });
 
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-await page.waitForFunction(() => (window.__THREE_GAME_DIAGNOSTICS__?.frame ?? 0) > 10, null, {
-  timeout: 60000,
-});
 
-await page.evaluate(() => {
-  const h = window.__THREE_GAME_TEST_HOOKS__;
-  h?.setMode?.('solo');
-  h?.setState?.('active-play');
-  h?.hideRivals?.(true);
-  for (const sel of ['#overlay-start', '#overlay-finish', '#hud', '#touch-controls']) {
-    const el = document.querySelector(sel);
-    if (el) el.style.display = 'none';
+/**
+ * Vite's HMR reloads the page whenever a source file changes, which destroys
+ * the `page.evaluate` execution context mid-run ("Execution context was
+ * destroyed, most likely because of a navigation"). That is expected when
+ * another process is editing the same working tree, so every evaluate goes
+ * through this: on failure it waits for the app to come back and re-applies
+ * the setup, then retries. Without it a single stray save aborts a 28-shot
+ * run ten shots in.
+ */
+let ready = false;
+async function waitForApp() {
+  await page.waitForFunction(() => (window.__THREE_GAME_DIAGNOSTICS__?.frame ?? 0) > 10, null, {
+    timeout: 60000,
+  });
+  await page.evaluate(() => {
+    const h = window.__THREE_GAME_TEST_HOOKS__;
+    h?.setMode?.('solo');
+    h?.setState?.('active-play');
+    h?.hideRivals?.(true);
+    for (const sel of ['#overlay-start', '#overlay-finish', '#hud', '#touch-controls']) {
+      const el = document.querySelector(sel);
+      if (el) el.style.display = 'none';
+    }
+  });
+  await page.waitForTimeout(400);
+  ready = true;
+}
+
+async function run(fn, arg) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await page.evaluate(fn, arg);
+    } catch (err) {
+      if (attempt === 3) throw err;
+      ready = false;
+      await waitForApp();
+      await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true));
+    }
   }
-});
-await page.waitForTimeout(600);
+  throw new Error('unreachable');
+}
+
+await waitForApp();
 
 // Freeze the simulation. Rendering keeps running with the parked camera, but
 // the kart stops sliding out of frame while the screenshots are taken.
-const pose = await page.evaluate(() => {
+const pose = await run(() => {
   const d = window.__THREE_GAME_DIAGNOSTICS__;
   window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(true);
   return { position: d.player.position, heading: d.player.heading ?? 0 };
@@ -100,10 +129,10 @@ const liveries = ['neon-blue', 'crimson', 'gold', 'violet'];
 const shots = [];
 
 for (const livery of liveries) {
-  await page.evaluate((id) => window.__THREE_GAME_TEST_HOOKS__?.selectCar?.(id), livery);
+  await run((id) => window.__THREE_GAME_TEST_HOOKS__?.selectCar?.(id), livery);
   await page.waitForTimeout(150);
   for (const angle of angles) {
-    await page.evaluate(
+    await run(
       ({ pos, look }) => window.__THREE_GAME_TEST_HOOKS__?.placeCamera?.(pos, look),
       { pos: angle.pos, look: angle.look },
     );

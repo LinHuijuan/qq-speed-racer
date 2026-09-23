@@ -134,6 +134,9 @@ type WheelGeometries = {
   tire: THREE.BufferGeometry;
   rim: THREE.BufferGeometry;
   hub: THREE.BufferGeometry;
+  /** Emissive ring sitting just inside the tyre bead — the classic lit-rim
+   *  look, and the only part of the wheel that reads at race distance. */
+  glowRing: THREE.BufferGeometry;
 };
 
 type KartGeometries = {
@@ -226,21 +229,19 @@ function buildBodyGeometries(): BodyGeometries {
       // (Hood LED strip moved to its own geometry/material so it can have a
       //  higher emissive intensity without dragging the splitter, skirts, and
       //  wing up with it.)
-      // Rear wing — was a flat slab, now a tilted airfoil. Endplates sit just
-      // outside the wing tips and read as the wing's vertical seals.
+      // Rear wing — a tilted airfoil with endplates. Narrowed from
+      // 1.18×BODY_WIDTH to 1.0 and dropped from y=1.04 to 0.98: at the larger
+      // size the wing was wider than every other part of the kart, sat above
+      // the roll hoop, and with no struts under it read as a cyan plank
+      // hovering behind the car. Carbon struts (below) now tie it to the
+      // engine cover, and lowering it lets the hoop read as the tallest point.
       {
-        geo: new THREE.BoxGeometry(BODY_WIDTH * 1.18, 0.05, 0.34),
-        pos: [0, 1.04, -BODY_LENGTH * 0.46],
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 1.0, 0.05, 0.34),
+        pos: [0, 0.98, -BODY_LENGTH * 0.46],
         rot: [-0.18, 0, 0],
       },
-      {
-        geo: new THREE.BoxGeometry(0.05, 0.18, 0.32),
-        pos: [-BODY_WIDTH * 0.58, 1.04, -BODY_LENGTH * 0.46],
-      },
-      {
-        geo: new THREE.BoxGeometry(0.05, 0.18, 0.32),
-        pos: [BODY_WIDTH * 0.58, 1.04, -BODY_LENGTH * 0.46],
-      },
+      // (Wing endplates moved to the carbon group — as accent they were the
+      //  two largest flat cyan faces in a rear view.)
       // Roll hoop. The original was a 0.42-radius π-torus rotated
       // `[-π/2, 0, 0]`, which lays the ring FLAT — so it was a horizontal
       // half-ring hovering over the body, and it read as a carry handle, not a
@@ -280,6 +281,25 @@ function buildBodyGeometries(): BodyGeometries {
       {
         geo: new THREE.BoxGeometry(BODY_WIDTH * 0.9, 0.05, 0.2),
         pos: [0, 0.72, -BODY_LENGTH * 0.5],
+      },
+      // Wing struts — span the 0.21 gap from the engine cover (top 0.745) to
+      // the wing (0.98). Without these the wing had nothing under it.
+      {
+        geo: new THREE.BoxGeometry(0.05, 0.24, 0.07),
+        pos: [-0.3, 0.86, -BODY_LENGTH * 0.46],
+      },
+      {
+        geo: new THREE.BoxGeometry(0.05, 0.24, 0.07),
+        pos: [0.3, 0.86, -BODY_LENGTH * 0.46],
+      },
+      // Wing endplates — the vertical seals at the wing tips.
+      {
+        geo: new THREE.BoxGeometry(0.05, 0.16, 0.32),
+        pos: [-BODY_WIDTH * 0.5, 0.98, -BODY_LENGTH * 0.46],
+      },
+      {
+        geo: new THREE.BoxGeometry(0.05, 0.16, 0.32),
+        pos: [BODY_WIDTH * 0.5, 0.98, -BODY_LENGTH * 0.46],
       },
       // Rear diffuser — three vertical fins below the rear deck. The center
       // fin is wider; the outer two step back slightly so the silhouette
@@ -381,30 +401,52 @@ function buildBodyGeometries(): BodyGeometries {
 }
 
 function buildWheelGeometries(radius: number): WheelGeometries {
+  /*
+   * The profile used to close at radius 0.01 — a lathe of that polyline is a
+   * nearly SOLID disc, so the tyre enclosed everything behind it. The rim
+   * disc, the spokes and the glow ring were all inside the tyre and never
+   * rendered; only the hub, which is 0.26 long against the tyre's 0.24, poked
+   * out as the grey square visible in every screenshot. The profile now starts
+   * at the bead (0.5×radius) and bulges outward, so the lathe is a tyre shell
+   * with a real hole in the middle and the rim shows through it.
+   */
   const tirePoints = [
-    new THREE.Vector2(0.01, -0.11),
-    new THREE.Vector2(radius * 0.55, -0.12),
-    new THREE.Vector2(radius * 0.95, -0.09),
+    new THREE.Vector2(radius * 0.5, -0.1),
+    new THREE.Vector2(radius * 0.78, -0.12),
+    new THREE.Vector2(radius * 0.96, -0.08),
     new THREE.Vector2(radius, 0),
-    new THREE.Vector2(radius * 0.95, 0.09),
-    new THREE.Vector2(radius * 0.55, 0.12),
-    new THREE.Vector2(0.01, 0.11),
+    new THREE.Vector2(radius * 0.96, 0.08),
+    new THREE.Vector2(radius * 0.78, 0.12),
+    new THREE.Vector2(radius * 0.5, 0.1),
   ];
 
-  // Rim disc plus the five spokes collapse into one mesh sharing the rim material.
+  /*
+   * Rim disc plus the spokes collapse into one mesh sharing the rim material.
+   *
+   * The spokes used to sit at local z = 0.1 with `rot: [angle, 0, 0]`, which
+   * is wrong twice over: the wheel's plane is XZ (its axis is local Y), so a
+   * box rotated about X sweeps the YZ plane — perpendicular to the wheel —
+   * and the z offset pushed them along the car's length rather than outboard.
+   * They are now long-axis-X bars rotated about Y, so they radiate in the
+   * wheel plane, and there is one set per face because local +Y maps to world
+   * -X for every wheel: without the mirrored set, only one side of the kart
+   * would show spokes.
+   */
   const rimParts: PlacedPart[] = [
     {
       geo: new THREE.CylinderGeometry(radius * 0.58, radius * 0.58, 0.2, 16),
       rot: [0, 0, Math.PI / 2],
     },
   ];
-  for (let i = 0; i < 5; i += 1) {
-    const angle = (i / 5) * Math.PI * 2;
-    rimParts.push({
-      geo: new THREE.BoxGeometry(0.06, radius * 0.9, 0.08),
-      pos: [0, 0, 0.1],
-      rot: [angle, 0, 0],
-    });
+  for (const face of [0.105, -0.105]) {
+    for (let i = 0; i < 5; i += 1) {
+      const angle = (i / 5) * Math.PI * 2;
+      rimParts.push({
+        geo: new THREE.BoxGeometry(radius * 0.9, 0.055, 0.07),
+        pos: [0, face, 0],
+        rot: [0, angle, 0],
+      });
+    }
   }
 
   return {
@@ -412,8 +454,33 @@ function buildWheelGeometries(radius: number): WheelGeometries {
     rim: mergeParts(rimParts),
     hub: mergeParts([
       {
-        geo: new THREE.CylinderGeometry(radius * 0.2, radius * 0.2, 0.26, 12),
+        geo: new THREE.CylinderGeometry(radius * 0.18, radius * 0.18, 0.24, 12),
         rot: [0, 0, Math.PI / 2],
+      },
+    ]),
+    /*
+     * RingGeometry, not TorusGeometry. The first attempt used a torus and it
+     * rendered as a horizontal bar across the tyre instead of a circle: a
+     * torus is a ring around its own Z, and working out where Z lands after
+     * the parent wheel's `rotation.z = π/2` is a two-step frame composition
+     * that I got wrong twice. A RingGeometry's normal is its +Z, so the
+     * mapping is one rotation: `rot.x = -π/2` sends +Z to +Y, which is the
+     * wheel's local axis — the ring then lies in the wheel's plane. Two of
+     * them, one per face at ±0.105 (just proud of the 0.2-deep rim disc), so
+     * both sides of the kart show a lit ring. The second is flipped +π/2 so
+     * its front face points the other way; a RingGeometry is single-sided and
+     * would otherwise be invisible from outside.
+     */
+    glowRing: mergeParts([
+      {
+        geo: new THREE.RingGeometry(radius * 0.3, radius * 0.48, 24),
+        pos: [0, 0.105, 0],
+        rot: [-Math.PI / 2, 0, 0],
+      },
+      {
+        geo: new THREE.RingGeometry(radius * 0.3, radius * 0.48, 24),
+        pos: [0, -0.105, 0],
+        rot: [Math.PI / 2, 0, 0],
       },
     ]),
   };
@@ -435,6 +502,7 @@ type WheelMaterials = {
   tire: THREE.MeshStandardMaterial;
   rim: THREE.MeshStandardMaterial;
   hub: THREE.MeshStandardMaterial;
+  glowRing: THREE.MeshStandardMaterial;
 };
 
 export class Kart {
@@ -496,6 +564,19 @@ export class Kart {
           emissiveIntensity: 0.35,
           roughness: 0.3,
           metalness: 0.6,
+        }),
+      ),
+      // Emissive at 1.1 rather than the accent trim's 0.22: the ring is 2.6cm
+      // thick, so at the trim's intensity it disappears entirely below race
+      // speed. 1.1 clears the 0.72 bloom threshold for the darker accents
+      // (crimson #ff6b6b, violet #e040fb) without clipping the gold one.
+      glowRing: this.track(
+        new THREE.MeshStandardMaterial({
+          color: this.config.accent,
+          emissive: this.config.accent,
+          emissiveIntensity: 1.1,
+          roughness: 0.25,
+          metalness: 0.4,
         }),
       ),
     };
@@ -777,6 +858,7 @@ const headlightHaloMat = this.track(
     wheel.rotation.z = Math.PI / 2;
     wheel.castShadow = true;
     wheel.add(new THREE.Mesh(geometries.rim, materials.rim));
+    wheel.add(new THREE.Mesh(geometries.glowRing, materials.glowRing));
     wheel.add(new THREE.Mesh(geometries.hub, materials.hub));
     return wheel;
   }
