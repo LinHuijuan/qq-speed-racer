@@ -2232,3 +2232,256 @@ body.duo-mode #touch-controls {
     display: none;
   }
 }
+
+/*
+ * Landscape, short viewports — a phone on its side is ~390px tall, and a
+ * desktop window dragged short runs into exactly the same wall.
+ *
+ * `.panel` is a flat block, so the start panel's eleven children stack to 968px
+ * of content. In a 357px-tall window that put 开始比赛 566px below the panel's
+ * visible bottom edge — a landscape player could not start a race at all. The
+ * finish panel had the same defect (再来一局 buried by 127px), and the touch
+ * layout made it worse by stacking `.finish-stats` into one column, which is a
+ * portrait rule that had no business firing in a 760px-wide panel.
+ *
+ * Shrinking the type cannot pay for this: the content is 2.7x the height that
+ * exists. So the panel reflows into two columns. The row split is the part that
+ * needs care — grid rows are shared between columns, so a right-hand block that
+ * spans the wrong rows leaves a gap as tall as the difference. Pairing the tall
+ * right blocks against the left-hand stack that is closest to them in height is
+ * what gets the start panel down to 309px of content in a 335px box, with the
+ * CTA sitting 128px clear of the fold. Tune by measuring, not by guessing:
+ * `node scripts/landscape-probe.mjs` prints every child's real height.
+ *
+ * The height term is what catches short desktop windows, so this is keyed on
+ * both axes rather than on `orientation` alone.
+ */
+@media (orientation: landscape) and (max-height: 560px) {
+  #overlay-start .panel,
+  #overlay-finish .panel,
+  #overlay-pause .panel {
+    width: min(760px, 100%);
+    max-height: calc(100vh - 10px);
+    padding: 14px 18px 12px;
+    display: grid;
+    column-gap: 18px;
+    align-content: start;
+  }
+
+  #overlay-start .panel h1,
+  #overlay-finish .panel h2,
+  #overlay-pause .panel h2 {
+    font-size: 1.9rem;
+  }
+
+  /* ---------------------------------------------------------- start menu */
+
+  #overlay-start .panel {
+    grid-template-columns: minmax(0, 0.84fr) minmax(0, 1.16fr);
+    grid-template-areas:
+      'eyebrow  tracks'
+      'title    tracks'
+      'lead     tracks'
+      'modes    tracks'
+      'start    cars'
+      'cont     cars'
+      'ctrls    settings'
+      'hint     settings';
+  }
+
+  #overlay-start .eyebrow {
+    grid-area: eyebrow;
+    margin: 0 0 6px;
+  }
+
+  #overlay-start h1 {
+    grid-area: title;
+  }
+
+  #overlay-start .lead {
+    grid-area: lead;
+    margin: 6px 0 0;
+    font-size: 0.85rem;
+  }
+
+  #overlay-start .mode-select {
+    grid-area: modes;
+    margin: 10px 0 4px;
+  }
+
+  #overlay-start .mode-btn {
+    min-height: 40px;
+  }
+
+  #overlay-start #start-button {
+    grid-area: start;
+    margin-top: 4px;
+  }
+
+  #overlay-start #continue-button {
+    grid-area: cont;
+  }
+
+  #overlay-start .controls-list {
+    grid-area: ctrls;
+    margin: 6px 0;
+    font-size: 0.78rem;
+    line-height: 1.45;
+  }
+
+  #overlay-start .hint {
+    grid-area: hint;
+    margin-top: 4px;
+    font-size: 0.74rem;
+  }
+
+  /* Two cards per row again: the coarse-pointer rule above forces one per row,
+     which is right for a 390px-wide portrait panel and wrong for a 408px-wide
+     column inside a 760px one. */
+  #overlay-start #track-picker {
+    grid-area: tracks;
+    grid-template-columns: 1fr 1fr;
+    margin: 0 0 6px;
+  }
+
+  #overlay-start .track-btn {
+    grid-template-columns: 48px 1fr;
+    min-height: 62px;
+    padding: 6px 8px;
+  }
+
+  #overlay-start .track-map {
+    width: 48px;
+    height: 48px;
+  }
+
+  #overlay-start #car-picker {
+    grid-area: cars;
+    grid-template-columns: repeat(4, 1fr);
+    margin: 0 0 6px;
+  }
+
+  #overlay-start .car-btn {
+    min-height: 68px;
+    padding: 6px 4px;
+  }
+
+  #overlay-start .car-btn .swatch {
+    width: 26px;
+    height: 26px;
+    margin-bottom: 4px;
+  }
+
+  #overlay-start .settings-block {
+    grid-area: settings;
+    margin: 0;
+  }
+
+  #overlay-start .setting-row {
+    margin: 5px 0;
+    font-size: 0.82rem;
+  }
+
+  /* ------------------------------------------------------- finish results */
+
+  #overlay-finish .panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'eyebrow  stats'
+      'title    stats'
+      'lead     stats'
+      'record   stats'
+      'restart  menu';
+  }
+
+  #overlay-finish .eyebrow {
+    grid-area: eyebrow;
+    margin: 0 0 6px;
+  }
+
+  #overlay-finish h2 {
+    grid-area: title;
+  }
+
+  #overlay-finish #finish-summary {
+    grid-area: lead;
+    margin: 6px 0 0;
+    font-size: 0.85rem;
+  }
+
+  #overlay-finish #finish-record {
+    grid-area: record;
+    margin: 4px 0 0 !important;
+  }
+
+  #overlay-finish .finish-stats {
+    grid-area: stats;
+    grid-template-columns: repeat(3, 1fr);
+    margin: 0;
+  }
+
+  #overlay-finish .finish-stats div {
+    padding: 10px 8px;
+  }
+
+  #overlay-finish #restart-button {
+    grid-area: restart;
+    margin-top: 12px;
+  }
+
+  #overlay-finish #finish-menu-button {
+    grid-area: menu;
+    margin-top: 12px !important;
+  }
+
+  /* --------------------------------------------------------------- pause */
+
+  #overlay-pause .panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'eyebrow  settings'
+      'title    settings'
+      'resume   hint'
+      'restart  hint'
+      'menu     hint';
+  }
+
+  #overlay-pause .eyebrow {
+    grid-area: eyebrow;
+    margin: 0 0 6px;
+  }
+
+  #overlay-pause h2 {
+    grid-area: title;
+  }
+
+  #overlay-pause .settings-block {
+    grid-area: settings;
+    margin: 0;
+    align-self: start;
+  }
+
+  #overlay-pause .setting-row {
+    margin: 5px 0;
+    font-size: 0.82rem;
+  }
+
+  #overlay-pause #resume-button {
+    grid-area: resume;
+    margin-top: 10px;
+  }
+
+  #overlay-pause #pause-restart-button {
+    grid-area: restart;
+  }
+
+  #overlay-pause #pause-menu-button {
+    grid-area: menu;
+  }
+
+  #overlay-pause .hint {
+    grid-area: hint;
+    align-self: start;
+    margin-top: 12px;
+  }
+}

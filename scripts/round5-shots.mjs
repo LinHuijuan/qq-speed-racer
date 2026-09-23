@@ -456,6 +456,147 @@ async function glareStats(page, shot, box) {
   await ctx.close();
 }
 
+/* --------------------------------------------------------- phone landscape */
+
+/*
+ * hint-layout-probe already asserts this viewport's geometry, but nobody was
+ * looking at its pixels. A landscape phone is the shortest viewport the game
+ * supports (390px tall), so it is where a vertical budget overrun shows up
+ * first — the same failure that pushed the start CTA under the fold on desktop.
+ */
+{
+  const { ctx, page } = await open({ width: 844, height: 390 });
+  console.log('\n== phone landscape 844x390 ==');
+  await shoot(page, '14-menu-landscape');
+  const land = await page.evaluate(() => {
+    const panel = document.querySelector('#overlay-start .panel');
+    const btn = document.querySelector('#start-button');
+    const pr = panel.getBoundingClientRect();
+    const br = btn.getBoundingClientRect();
+    return {
+      over: panel.scrollWidth - panel.clientWidth,
+      ctaFits: br.bottom <= pr.bottom + 0.5,
+      slack: Math.round(pr.bottom - br.bottom),
+      panelScroll: panel.scrollHeight - panel.clientHeight,
+    };
+  });
+  check('landscape panel has no horizontal overflow', land.over <= 1, `+${land.over}px`);
+  check(
+    'landscape CTA is above the fold',
+    land.ctaFits,
+    `slack=${land.slack}px panelScroll=${land.panelScroll}px`,
+  );
+
+  /*
+   * The worst case for the landscape budget: a saved race puts 继续上次比赛 back
+   * on the menu, which is one more 48px pill competing for the same column. The
+   * button ships with an inline `display: none`, so force it on, measure, and
+   * take it back off.
+   */
+  const withSave = await page.evaluate(() => {
+    const el = document.createElement('style');
+    el.id = '__force_continue__';
+    el.textContent = '#overlay-start #continue-button{display:block !important}';
+    document.head.appendChild(el);
+    const panel = document.querySelector('#overlay-start .panel');
+    const btn = document.querySelector('#start-button');
+    const pr = panel.getBoundingClientRect();
+    const br = btn.getBoundingClientRect();
+    const res = {
+      ctaFits: br.bottom <= pr.bottom + 0.5,
+      slack: Math.round(pr.bottom - br.bottom),
+      panelScroll: panel.scrollHeight - panel.clientHeight,
+    };
+    el.remove();
+    return res;
+  });
+  check(
+    'landscape CTA survives a saved race',
+    withSave.ctaFits,
+    `slack=${withSave.slack}px panelScroll=${withSave.panelScroll}px`,
+  );
+
+  /*
+   * The finish and pause overlays keep layout at opacity 0, so all three panels
+   * can be measured in one pass. They are in this block on purpose: the same
+   * landscape reflow covers all three, and on a landscape phone being unable to
+   * restart after a race is as fatal as being unable to start one.
+   */
+  const measure = ([sel, ctaSel]) =>
+    (() => {
+      const p = document.querySelector(`${sel} .panel`);
+      const cta = document.querySelector(ctaSel);
+      if (!p || !cta) return { missing: true };
+      const pr = p.getBoundingClientRect();
+      const cr = cta.getBoundingClientRect();
+      const stats = p.querySelector('.finish-stats');
+      return {
+        ctaFits: cr.bottom <= pr.bottom + 0.5,
+        slack: Math.round(pr.bottom - cr.bottom),
+        over: p.scrollWidth - p.clientWidth,
+        scroll: p.scrollHeight - p.clientHeight,
+        statCols: stats ? getComputedStyle(stats).gridTemplateColumns.split(' ').length : null,
+      };
+    })();
+
+  const pause = await page.evaluate(measure, ['#overlay-pause', '#resume-button']);
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__.setState('complete'));
+  await page.waitForTimeout(300);
+  const finish = await page.evaluate(measure, ['#overlay-finish', '#restart-button']);
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__.setState('menu'));
+  await page.waitForTimeout(300);
+
+  check(
+    'landscape finish CTA is above the fold',
+    finish.ctaFits,
+    `slack=${finish.slack}px panelScroll=${finish.scroll}px`,
+  );
+  check(
+    'landscape finish stats stay on one row',
+    finish.statCols === 3,
+    `grid-template-columns has ${finish.statCols} tracks`,
+  );
+  check(
+    'landscape pause CTA is above the fold',
+    pause.ctaFits,
+    `slack=${pause.slack}px panelScroll=${pause.scroll}px`,
+  );
+
+  await page.evaluate(() => {
+    window.__THREE_GAME_TEST_HOOKS__.setState('active-play');
+    window.__THREE_GAME_TEST_HOOKS__.grantItem('turbo');
+  });
+  await page.keyboard.down('w');
+  await page.waitForTimeout(1500);
+
+  /*
+   * hint-layout-probe covers the wording at this viewport, but only on a page
+   * that has never left the menu. This block walks menu -> complete -> menu ->
+   * active-play, and the drift hint is written from a `!== last` guard inside
+   * the HUD, so a stale string is exactly the kind of thing that only shows up
+   * after a state round-trip. Read it here, where the player would read it.
+   */
+  const wording = await page.evaluate(() => ({
+    hint: document.querySelector('#drift-hint').textContent.trim(),
+    padVisible: getComputedStyle(document.querySelector('#touch-controls')).display !== 'none',
+    coarse: matchMedia('(pointer: coarse)').matches,
+  }));
+  check(
+    'landscape drift hint matches the touch pad',
+    !wording.padVisible || !/Shift|Z\b/.test(wording.hint),
+    `hint="${wording.hint}" pad=${wording.padVisible} coarse=${wording.coarse}`,
+  );
+
+  await shoot(page, '15-race-landscape');
+  /*
+   * A full 844x390 frame is not enough to read a 0.72rem label — the drift hint
+   * under the nitro bar is ~10px tall there, and eyeballing the wide shot is how
+   * a correct touch wording gets misread as the keyboard one. Crop the cluster.
+   */
+  await closeUp(page, '.nitro-cluster', '16-nitro-landscape');
+  await ctx.close();
+}
+
 await browser.close();
 
 console.log('\n=== summary ===');
