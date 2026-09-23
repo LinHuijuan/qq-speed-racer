@@ -132,6 +132,9 @@ type BodyGeometries = {
 
 type WheelGeometries = {
   tire: THREE.BufferGeometry;
+  /** Dark inner drum. Separating it from `rim` is what makes the spokes read:
+   *  a single silver disc for rim + spokes renders as one flat plate. */
+  barrel: THREE.BufferGeometry;
   rim: THREE.BufferGeometry;
   hub: THREE.BufferGeometry;
   /** Emissive ring sitting just inside the tyre bead — the classic lit-rim
@@ -226,6 +229,17 @@ function buildBodyGeometries(): BodyGeometries {
         geo: new THREE.BoxGeometry(0.06, 0.05, BODY_LENGTH * 0.5),
         pos: [BODY_WIDTH * 0.48 + 0.1, 0.42, -0.1],
       },
+      // Canard leading edges — a 2cm lit strip on each canard's outer edge.
+      {
+        geo: new THREE.BoxGeometry(0.02, 0.03, 0.18),
+        pos: [-BODY_WIDTH * 0.56 - 0.1, 0.395, BODY_LENGTH * 0.34],
+        rot: [0.12, 0, 0.35],
+      },
+      {
+        geo: new THREE.BoxGeometry(0.02, 0.03, 0.18),
+        pos: [BODY_WIDTH * 0.56 + 0.1, 0.395, BODY_LENGTH * 0.34],
+        rot: [0.12, 0, -0.35],
+      },
       // (Hood LED strip moved to its own geometry/material so it can have a
       //  higher emissive intensity without dragging the splitter, skirts, and
       //  wing up with it.)
@@ -301,6 +315,24 @@ function buildBodyGeometries(): BodyGeometries {
         geo: new THREE.BoxGeometry(0.05, 0.16, 0.32),
         pos: [BODY_WIDTH * 0.5, 0.98, -BODY_LENGTH * 0.46],
       },
+      // Front canards (dive planes) — one per side, tilted 0.35 rad up and
+      // 0.12 rad nose-down. They exist to break the nose: the region from the
+      // front fenders forward was one unbroken flat plane, and a flat plane is
+      // what still made the front read as a slab even after the splitter went
+      // dark. x = ±0.56×BODY_WIDTH is deliberate — at ±0.46 the plates sat
+      // inside the 1.2-wide chassis pan (x ±0.60) and were built, merged and
+      // uploaded without ever being visible. Anything you attach to this hull
+      // has to clear |x| = 0.60 or it is decoration for the compiler.
+      {
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 0.18, 0.022, 0.18),
+        pos: [-BODY_WIDTH * 0.56, 0.36, BODY_LENGTH * 0.34],
+        rot: [0.12, 0, 0.35],
+      },
+      {
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 0.18, 0.022, 0.18),
+        pos: [BODY_WIDTH * 0.56, 0.36, BODY_LENGTH * 0.34],
+        rot: [0.12, 0, -0.35],
+      },
       // Rear diffuser — three vertical fins below the rear deck. The center
       // fin is wider; the outer two step back slightly so the silhouette
       // tapers like a real diffuser rather than a flat wall.
@@ -324,6 +356,12 @@ function buildBodyGeometries(): BodyGeometries {
       // Driver helmet hint — a low-poly sphere inside the canopy. At 0.10
       // radius it reads as a head shape without modelling a face.
       { geo: new THREE.SphereGeometry(0.1, 14, 10), pos: [0, 0.86, 0.14] },
+      // Nose vent — a dark slot sunk into the nose tip's top face. Same job
+      // as the canards: give the eye something other than a flat plane.
+      {
+        geo: new THREE.BoxGeometry(BODY_WIDTH * 0.3, 0.05, 0.12),
+        pos: [0, 0.435, BODY_LENGTH * 0.58],
+      },
       // Side air intakes — slim carbon-look boxes hugging the cockpit. The
       // inset face is the same material so they show as a notch, not a slot.
       { geo: new THREE.BoxGeometry(0.04, 0.16, 0.5), pos: [-BODY_WIDTH * 0.42, 0.62, 0.05] },
@@ -421,28 +459,42 @@ function buildWheelGeometries(radius: number): WheelGeometries {
   ];
 
   /*
-   * Rim disc plus the spokes collapse into one mesh sharing the rim material.
+   * The rim is three stacked layers, not one disc.
    *
-   * The spokes used to sit at local z = 0.1 with `rot: [angle, 0, 0]`, which
-   * is wrong twice over: the wheel's plane is XZ (its axis is local Y), so a
-   * box rotated about X sweeps the YZ plane — perpendicular to the wheel —
-   * and the z offset pushed them along the car's length rather than outboard.
-   * They are now long-axis-X bars rotated about Y, so they radiate in the
-   * wheel plane, and there is one set per face because local +Y maps to world
-   * -X for every wheel: without the mirrored set, only one side of the kart
-   * would show spokes.
+   * v1 had a single silver cylinder of radius 0.58r doing duty as both the
+   * rim face and the spokes. Even after the tyre was opened up so it could
+   * finally be seen, it rendered as one flat silver plate — the spokes were
+   * 0.005 proud of the disc face in the same material, which is no
+   * difference at all. Now: a dark barrel (radius 0.50r, depth 0.16), a
+   * silver lip ring around the bead, bright spokes standing 0.02 proud of
+   * the barrel at ±0.10, and the glow ring sandwiched at ±0.09 behind them —
+   * so the lit disc reads as a brake rotor seen through the spokes.
+   *
+   * The spokes are long-axis-X bars rotated about Y, so they radiate in the
+   * wheel plane (the wheel's plane is XZ; its axis is local Y). One set per
+   * face, because local +Y maps to world -X for every wheel — without the
+   * mirrored set only one side of the kart would show spokes.
    */
   const rimParts: PlacedPart[] = [
+    // Lip ring at the bead, a rectangular-section lathe around Y.
     {
-      geo: new THREE.CylinderGeometry(radius * 0.58, radius * 0.58, 0.2, 16),
-      rot: [0, 0, Math.PI / 2],
+      geo: new THREE.LatheGeometry(
+        [
+          new THREE.Vector2(radius * 0.5, -0.08),
+          new THREE.Vector2(radius * 0.58, -0.08),
+          new THREE.Vector2(radius * 0.58, 0.08),
+          new THREE.Vector2(radius * 0.5, 0.08),
+          new THREE.Vector2(radius * 0.5, -0.08),
+        ],
+        20,
+      ),
     },
   ];
-  for (const face of [0.105, -0.105]) {
+  for (const face of [0.1, -0.1]) {
     for (let i = 0; i < 5; i += 1) {
       const angle = (i / 5) * Math.PI * 2;
       rimParts.push({
-        geo: new THREE.BoxGeometry(radius * 0.9, 0.055, 0.07),
+        geo: new THREE.BoxGeometry(radius * 0.95, 0.045, 0.06),
         pos: [0, face, 0],
         rot: [0, angle, 0],
       });
@@ -451,6 +503,12 @@ function buildWheelGeometries(radius: number): WheelGeometries {
 
   return {
     tire: new THREE.LatheGeometry(tirePoints, 20),
+    barrel: mergeParts([
+      {
+        geo: new THREE.CylinderGeometry(radius * 0.5, radius * 0.5, 0.16, 18),
+        rot: [0, 0, Math.PI / 2],
+      },
+    ]),
     rim: mergeParts(rimParts),
     hub: mergeParts([
       {
@@ -473,13 +531,13 @@ function buildWheelGeometries(radius: number): WheelGeometries {
      */
     glowRing: mergeParts([
       {
-        geo: new THREE.RingGeometry(radius * 0.3, radius * 0.48, 24),
-        pos: [0, 0.105, 0],
+        geo: new THREE.RingGeometry(radius * 0.26, radius * 0.46, 24),
+        pos: [0, 0.09, 0],
         rot: [-Math.PI / 2, 0, 0],
       },
       {
-        geo: new THREE.RingGeometry(radius * 0.3, radius * 0.48, 24),
-        pos: [0, -0.105, 0],
+        geo: new THREE.RingGeometry(radius * 0.26, radius * 0.46, 24),
+        pos: [0, -0.09, 0],
         rot: [Math.PI / 2, 0, 0],
       },
     ]),
@@ -500,6 +558,7 @@ function kartGeometries(): KartGeometries {
 
 type WheelMaterials = {
   tire: THREE.MeshStandardMaterial;
+  barrel: THREE.MeshStandardMaterial;
   rim: THREE.MeshStandardMaterial;
   hub: THREE.MeshStandardMaterial;
   glowRing: THREE.MeshStandardMaterial;
@@ -553,6 +612,9 @@ export class Kart {
     const wheelMaterials: WheelMaterials = {
       tire: this.track(
         new THREE.MeshStandardMaterial({ color: '#0b0d12', roughness: 0.92, metalness: 0.08 }),
+      ),
+      barrel: this.track(
+        new THREE.MeshStandardMaterial({ color: '#1a2029', roughness: 0.45, metalness: 0.65 }),
       ),
       rim: this.track(
         new THREE.MeshStandardMaterial({ color: '#c8d4e8', roughness: 0.22, metalness: 0.88 }),
@@ -857,8 +919,9 @@ const headlightHaloMat = this.track(
     const wheel = new THREE.Mesh(geometries.tire, materials.tire);
     wheel.rotation.z = Math.PI / 2;
     wheel.castShadow = true;
-    wheel.add(new THREE.Mesh(geometries.rim, materials.rim));
+    wheel.add(new THREE.Mesh(geometries.barrel, materials.barrel));
     wheel.add(new THREE.Mesh(geometries.glowRing, materials.glowRing));
+    wheel.add(new THREE.Mesh(geometries.rim, materials.rim));
     wheel.add(new THREE.Mesh(geometries.hub, materials.hub));
     return wheel;
   }
