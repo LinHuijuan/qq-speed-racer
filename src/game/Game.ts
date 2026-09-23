@@ -29,8 +29,10 @@ import {
 import { clearRaceSave, loadRace, saveRace, type KartSave, type RaceSave } from '../systems/save';
 import { Track } from './Track';
 import { TRACK_LAYOUTS, type TrackLayoutId } from './TrackLayouts';
+import { trackPreview } from './TrackPreview';
 import { CAR_STYLES, getCarStyle } from './CarStyles';
 import { createSeededRandom } from '../utils/random';
+import { withAlpha } from '../utils/color';
 import { loadGameTexture } from '../assets/textures';
 
 const TOTAL_LAPS = 3;
@@ -102,6 +104,13 @@ export class Game {
   private readonly shadowFocus = new THREE.Vector3();
   private post: PostPipeline;
   private readonly speedLines = document.querySelector<HTMLElement>('#speed-lines');
+  /**
+   * Speed response is published as a single CSS custom property on #app, which
+   * the HUD chrome reads to brighten with the kart (chip rails, the speed ring's
+   * tick bezel, the streaks' filter). One write drives all of them, instead of
+   * each element being touched from the render loop.
+   */
+  private readonly appRoot = document.querySelector<HTMLElement>('#app');
   private offtrackHelp: HTMLElement | null = null;
   private offTrackTimer = 0;
   private readonly loop = new Loop(
@@ -206,6 +215,7 @@ export class Game {
   private elapsed = 0;
   private slipstreamToastCooldown = 0;
   private lastSpeedLineOpacity = -1;
+  private lastSpeedT = -1;
   private lastSpeedLinesBoost = false;
   private lastSpeedLinesDrift = false;
   private lastOffTrackHelpVisible = false;
@@ -689,7 +699,10 @@ export class Game {
       btn.type = 'button';
       btn.className = `car-btn${car.id === this.settings.carId ? ' active' : ''}`;
       btn.dataset.carId = car.id;
-      btn.innerHTML = `<span class="swatch" style="background:linear-gradient(135deg,${car.color},${car.accent})"></span><strong>${car.name}</strong><span>${car.desc}</span>`;
+      btn.style.setProperty('--car-a', car.color);
+      btn.style.setProperty('--car-b', car.accent);
+      btn.style.setProperty('--car-glow', withAlpha(car.accent, 0.32));
+      btn.innerHTML = `<span class="swatch" style="background:radial-gradient(circle at 34% 28%, #fff 0%, ${car.accent} 42%, ${car.color} 100%)"></span><strong>${car.name}</strong><span class="car-desc">${car.desc}</span>`;
       btn.addEventListener('click', () => this.selectCar(car.id));
       host.appendChild(btn);
     }
@@ -735,11 +748,41 @@ export class Game {
     if (!host) return;
     host.innerHTML = '';
     for (const layout of TRACK_LAYOUTS) {
+      // 52 is also the drawn size in CSS, so the preview's stroke widths map 1:1
+      // to pixels and nothing has to be rescaled by hand.
+      const preview = trackPreview(layout.id, 52, 7);
+      const gradientId = `track-map-grad-${layout.id}`;
+      const boostDots = preview.boosts
+        .map((pad) => `<circle class="track-map-boost" cx="${pad.x}" cy="${pad.y}" r="2.1" />`)
+        .join('');
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = `track-btn${layout.id === this.trackId ? ' active' : ''}`;
       btn.dataset.trackId = layout.id;
-      btn.innerHTML = `<strong>${layout.name}</strong><span>${layout.desc}</span>`;
+      btn.style.setProperty('--track-a', preview.accentA);
+      btn.style.setProperty('--track-b', preview.accentB);
+      btn.style.setProperty('--track-glow', withAlpha(preview.accentA, 0.3));
+      // Three paths share one `d`: a wide soft halo, the two-tone line, and a
+      // white dash that only animates on the selected card.
+      btn.innerHTML = `
+        <svg class="track-map" viewBox="0 0 52 52" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="${gradientId}" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="${preview.accentA}" />
+              <stop offset="1" stop-color="${preview.accentB}" />
+            </linearGradient>
+          </defs>
+          <path class="track-map-halo" d="${preview.path}" />
+          <path class="track-map-line" d="${preview.path}" style="stroke:url(#${gradientId})" />
+          <path class="track-map-flow" d="${preview.path}" />
+          ${boostDots}
+          <circle class="track-map-start" cx="${preview.start.x}" cy="${preview.start.y}" r="3" />
+        </svg>
+        <span class="track-meta">
+          <strong>${layout.name}</strong>
+          <span>${layout.desc}</span>
+        </span>
+      `;
       btn.addEventListener('click', () => this.selectTrack(layout.id));
       host.appendChild(btn);
     }
@@ -1490,15 +1533,21 @@ export class Game {
       this.vfx.emitDrift(right, forward, Math.abs(state.driftAngle));
     }
     if (state.isBoosting) {
-      this.vfx.emitBoost(origin, forward);
+      // Both bursts come off the rear. One of them used to fire at the kart's
+      // centre, which at chase-camera range stacked a handful of additive glows
+      // *inside* the body and bloomed into a white blob that hid the car at the
+      // exact moment the player needs to see it.
       const rear = this.scratchRear.copy(origin).addScaledVector(forward, -1.2);
       rear.y = 0.25;
       this.vfx.emitBoost(rear, forward);
-    } else if (state.speed > 32) {
-      // High-speed heat trail (seeded, not Math.random)
-      const rear = this.scratchRear.copy(origin).addScaledVector(forward, -1.0);
-      rear.y = 0.2;
-      if (this.rng() > 0.55) this.vfx.emitSparks(rear, 1, '#8ac8ff');
+      this.vfx.emitTrail(rear, forward, 1);
+    } else if (state.speed > 28) {
+      // High-speed heat trail. Rate and size both climb with speed, so the tail
+      // of the kart visibly starts to glow before the boost threshold rather
+      // than switching on at a single number.
+      const rear = this.scratchRear.copy(origin).addScaledVector(forward, -1.05);
+      rear.y = 0.24;
+      this.vfx.emitTrail(rear, forward, THREE.MathUtils.clamp((state.speed - 28) / 22, 0, 1));
     }
   }
 
@@ -1529,7 +1578,19 @@ export class Game {
       this.speedLines.classList.toggle('drift', drifting);
       this.lastSpeedLinesDrift = drifting;
     }
-    this.post.bloom.strength = boosting ? 0.38 : 0.18 + ratio * 0.08;
+    // Quantised to 1/20 so a slow drift in speed does not invalidate style on
+    // every frame; 20 steps across the range is finer than the eye resolves on
+    // a glow. Boosting pins it to 1 regardless of the raw ratio.
+    const speedT = boosting ? 1 : Math.round(ratio * 20) / 20;
+    if (speedT !== this.lastSpeedT) {
+      this.appRoot?.style.setProperty('--speed-t', String(speedT));
+      this.lastSpeedT = speedT;
+    }
+    // Boost gets a stronger bloom than cruise, but not by much: the threshold
+    // sits at 0.72 now, so 0.44 bloomed the whole frame into haze and turned the
+    // kart into an unreadable white blob at exactly the moment the player needs
+    // to see it.
+    this.post.bloom.strength = boosting ? 0.34 : 0.18 + ratio * 0.1;
   }
 
   private registerCombo(kind: string): void {

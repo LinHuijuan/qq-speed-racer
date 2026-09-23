@@ -101,11 +101,18 @@ export function createPostPipeline(
   composer.addPass(singlePass);
   composer.addPass(splitPass);
 
+  /*
+   * Threshold 0.72 / radius 0.42 rather than the previous 0.85 / 0.28. At 0.85
+   * almost nothing in a night scene clears the bar, so the neon liveries and
+   * emissive trim never bloomed and the whole thing read as flat paint; the
+   * wider radius turns what does clear it into a soft halo instead of a tight
+   * rim. Strength is left to the caller — Game.ts raises it with speed.
+   */
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.2,
-    0.28,
-    0.85,
+    0.22,
+    0.42,
+    0.72,
   );
   composer.addPass(bloom);
   composer.addPass(new OutputPass());

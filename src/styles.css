@@ -6,6 +6,7 @@
   --cyan: #2de2ff;
   --magenta: #ff3cac;
   --gold: #ffd166;
+  --violet: #9b6bff;
   --panel: rgba(10, 14, 30, 0.78);
   --panel-strong: rgba(8, 12, 26, 0.92);
   --border: rgba(45, 226, 255, 0.28);
@@ -14,6 +15,15 @@
   --radius-sm: 10px;
   --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
   --glow-cyan: 0 0 24px rgba(45, 226, 255, 0.28);
+  /* One 1px line of "light catching the top edge". Every glass surface shares it
+     so the chips, panels and cards read as the same material. */
+  --hairline: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  --hairline-soft: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  /* Speed response, 0 at a standstill -> 1 at top speed. Written once per frame
+     by updateSpeedLines() in Game.ts (dirty-checked, so it is not a per-frame
+     style invalidation) and read here by anything that should get brighter the
+     faster the kart goes. Kept unitless so it can scale lengths and alphas. */
+  --speed-t: 0;
   /* On-screen touch pad geometry. The pad is as tall as its tallest child — the
      stick or the 2x2 action grid — and .hud-bottom is offset from it, so the two
      cannot drift into each other when either one is resized. */
@@ -76,14 +86,51 @@ kbd {
   pointer-events: none;
   opacity: 0;
   mix-blend-mode: screen;
-  background:
-    radial-gradient(ellipse 70% 55% at 50% 50%, transparent 35%, rgba(140, 220, 255, 0.12) 70%, transparent 100%),
-    repeating-conic-gradient(
-      from 0deg at 50% 50%,
-      transparent 0deg 4deg,
-      rgba(180, 230, 255, 0.045) 4deg 5deg
-    );
+  background: radial-gradient(
+    ellipse 70% 55% at 50% 50%,
+    transparent 35%,
+    rgba(140, 220, 255, 0.12) 70%,
+    transparent 100%
+  );
+  /* Brightness rides the speed variable, so the streaks get hotter as the kart
+     winds up instead of snapping on at one threshold. */
+  filter: brightness(calc(0.9 + var(--speed-t) * 0.55));
   transition: opacity 0.15s ease;
+}
+
+/*
+ * The streaks live on ::before so they can carry their own mask. Masking the
+ * whole element would also clip ::after's horizon glow.
+ *
+ * The annulus mask is what turns the old full-screen pinwheel into speed
+ * streaks: the conic wedges still start at the centre, but everything inside
+ * 26% of the way out is cut away, so what is left reads as light bleeding past
+ * the camera rather than as a spinning wheel of solid wedges.
+ */
+#speed-lines::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    transparent 0deg 2.6deg,
+    rgba(190, 235, 255, 0.085) 2.6deg 3.1deg,
+    transparent 3.1deg 5.2deg
+  );
+  -webkit-mask-image: radial-gradient(
+    circle at 50% 50%,
+    transparent 26%,
+    #000 58%,
+    #000 86%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    circle at 50% 50%,
+    transparent 26%,
+    #000 58%,
+    #000 86%,
+    transparent 100%
+  );
 }
 
 #speed-lines::after {
@@ -94,27 +141,43 @@ kbd {
   left: 0;
   height: 28%;
   background: linear-gradient(to top, rgba(90, 200, 255, 0.18), transparent);
-  opacity: 0.8;
+  opacity: calc(0.6 + var(--speed-t) * 0.4);
+}
+
+#speed-lines.boost::before {
+  background: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    transparent 0deg 2deg,
+    rgba(130, 245, 255, 0.3) 2deg 2.6deg,
+    transparent 2.6deg 4.4deg
+  );
 }
 
 #speed-lines.boost {
-  background:
-    radial-gradient(ellipse 65% 50% at 50% 50%, transparent 22%, rgba(45, 226, 255, 0.28) 60%, transparent 100%),
-    repeating-conic-gradient(
-      from 0deg at 50% 50%,
-      transparent 0deg 3deg,
-      rgba(120, 240, 255, 0.12) 3deg 4deg
-    );
+  background: radial-gradient(
+    ellipse 65% 50% at 50% 50%,
+    transparent 22%,
+    rgba(45, 226, 255, 0.3) 60%,
+    transparent 100%
+  );
+}
+
+#speed-lines.drift::before {
+  background: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    transparent 0deg 2.4deg,
+    rgba(255, 140, 210, 0.22) 2.4deg 3deg,
+    transparent 3deg 5deg
+  );
 }
 
 #speed-lines.drift {
-  background:
-    radial-gradient(ellipse 70% 55% at 50% 50%, transparent 30%, rgba(255, 60, 172, 0.2) 68%, transparent 100%),
-    repeating-conic-gradient(
-      from 0deg at 50% 50%,
-      transparent 0deg 3.5deg,
-      rgba(255, 120, 200, 0.09) 3.5deg 4.5deg
-    );
+  background: radial-gradient(
+    ellipse 70% 55% at 50% 50%,
+    transparent 30%,
+    rgba(255, 60, 172, 0.22) 68%,
+    transparent 100%
+  );
 }
 
 #speed-lines.flash-boost {
@@ -195,19 +258,64 @@ kbd {
   z-index: -1;
 }
 
+/*
+ * Glass chip. The neon edge is a two-layer background rather than a
+ * `border-color`: layer 1 is the surface clipped to the padding box, layer 2 is
+ * the edge gradient clipped to the border box, so the 1px transparent border
+ * shows the gradient and nothing else. Using `border-color` here would paint a
+ * flat colour straight over the gradient.
+ */
 .hud-chip {
+  position: relative;
   min-width: 84px;
-  padding: 8px 11px;
-  border: 1px solid var(--border-soft);
+  padding: 8px 12px 8px 14px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: linear-gradient(160deg, rgba(16, 22, 42, 0.82), rgba(8, 12, 28, 0.72));
+  background-image:
+    linear-gradient(160deg, rgba(26, 38, 70, 0.93), rgba(9, 13, 28, 0.87)),
+    linear-gradient(
+      160deg,
+      rgba(45, 226, 255, 0.8),
+      rgba(238, 244, 255, 0.14) 52%,
+      rgba(255, 60, 172, 0.55)
+    );
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   backdrop-filter: blur(12px);
-  box-shadow: var(--shadow);
+  box-shadow: var(--hairline), var(--shadow);
+}
+
+/* Left accent rail. It brightens with speed, which is the only HUD element that
+   changes continuously, so the chrome feels connected to the kart. */
+.hud-chip::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(to bottom, var(--cyan), var(--magenta));
+  opacity: calc(0.45 + var(--speed-t) * 0.55);
+  box-shadow: 0 0 calc(6px + var(--speed-t) * 8px) rgba(45, 226, 255, 0.55);
 }
 
 .hud-chip.best {
-  border-color: rgba(255, 209, 102, 0.45);
-  box-shadow: 0 0 18px rgba(255, 209, 102, 0.12), var(--shadow);
+  background-image:
+    linear-gradient(160deg, rgba(38, 32, 18, 0.93), rgba(14, 12, 10, 0.87)),
+    linear-gradient(
+      160deg,
+      rgba(255, 209, 102, 0.9),
+      rgba(238, 244, 255, 0.16) 55%,
+      rgba(255, 138, 31, 0.6)
+    );
+  box-shadow: var(--hairline), 0 0 20px rgba(255, 209, 102, 0.16), var(--shadow);
+}
+
+.hud-chip.best::before {
+  background: linear-gradient(to bottom, var(--gold), #ff8a1f);
+  box-shadow: 0 0 8px rgba(255, 209, 102, 0.55);
+  opacity: 0.9;
 }
 
 .track-chip strong {
@@ -217,6 +325,7 @@ kbd {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  filter: drop-shadow(0 0 8px rgba(45, 226, 255, 0.4));
 }
 
 .minimap-chip {
@@ -229,9 +338,10 @@ kbd {
   width: 108px;
   height: 108px;
   margin-top: 2px;
-  border: 1px solid rgba(45, 226, 255, 0.22);
+  border: 1px solid rgba(45, 226, 255, 0.3);
   border-radius: 8px;
   background: rgba(4, 8, 18, 0.55);
+  box-shadow: inset 0 0 18px rgba(45, 226, 255, 0.12);
 }
 
 .hud-chip .label {
@@ -458,10 +568,45 @@ kbd {
   height: 132px;
 }
 
+/*
+ * Outer tick bezel. A conic gradient under an annulus mask beats 24 hand-written
+ * <line> elements: no extra DOM, one paint, and it cannot fall out of sync with
+ * the ring's size. It brightens with speed, so the dial visibly "spins up".
+ */
+.speed-ring::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    rgba(238, 244, 255, 0.5) 0deg 1deg,
+    transparent 1deg 15deg
+  );
+  -webkit-mask-image: radial-gradient(
+    circle at 50% 50%,
+    transparent 91%,
+    #000 92%,
+    #000 99%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    circle at 50% 50%,
+    transparent 91%,
+    #000 92%,
+    #000 99%,
+    transparent 100%
+  );
+  opacity: calc(0.5 + var(--speed-t) * 0.5);
+  pointer-events: none;
+}
+
 .speed-ring svg {
   width: 100%;
   height: 100%;
   transform: rotate(-120deg);
+  /* The arc's drop-shadow bleeds past the viewBox edge. */
+  overflow: visible;
 }
 
 .track-bg,
@@ -471,6 +616,14 @@ kbd {
   stroke-linecap: round;
 }
 
+/* Inner dashed reference ring — a second depth plane inside the dial. */
+.track-inner {
+  fill: none;
+  stroke: rgba(238, 244, 255, 0.07);
+  stroke-width: 1;
+  stroke-dasharray: 2 6;
+}
+
 .track-bg {
   stroke: rgba(238, 244, 255, 0.12);
   stroke-dasharray: 220 327;
@@ -478,13 +631,14 @@ kbd {
 
 .track-arc {
   stroke: url(#speed-grad);
-  stroke: var(--cyan);
   stroke-dasharray: 0 327;
+  filter: drop-shadow(0 0 5px rgba(45, 226, 255, 0.7));
   transition: stroke 0.15s ease;
 }
 
 .track-arc.hot {
-  stroke: var(--magenta);
+  stroke: url(#speed-grad-hot);
+  filter: drop-shadow(0 0 8px rgba(255, 60, 172, 0.85));
 }
 
 .speed-readout {
@@ -499,6 +653,9 @@ kbd {
   font-size: 2rem;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  text-shadow:
+    0 0 14px rgba(45, 226, 255, 0.5),
+    0 0 34px rgba(45, 226, 255, calc(0.12 + var(--speed-t) * 0.4));
 }
 
 .speed-readout span {
@@ -510,19 +667,42 @@ kbd {
 .gear-tag {
   min-width: 42px;
   padding: 10px 8px;
-  border: 1px solid rgba(255, 60, 172, 0.4);
-  background: rgba(255, 60, 172, 0.12);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background-image:
+    linear-gradient(160deg, rgba(48, 14, 36, 0.9), rgba(20, 8, 22, 0.85)),
+    linear-gradient(
+      160deg,
+      rgba(255, 60, 172, 0.85),
+      rgba(238, 244, 255, 0.14) 55%,
+      rgba(155, 107, 255, 0.6)
+    );
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   color: #ff9ad5;
   font-weight: 800;
   text-align: center;
+  text-shadow: 0 0 10px rgba(255, 60, 172, 0.6);
+  box-shadow: var(--hairline-soft);
 }
 
 .nitro-cluster {
   width: min(320px, 42vw);
   padding: 12px 14px;
-  border: 1px solid var(--border);
-  background: var(--panel);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background-image:
+    linear-gradient(160deg, rgba(18, 24, 46, 0.88), rgba(8, 11, 24, 0.82)),
+    linear-gradient(
+      160deg,
+      rgba(45, 226, 255, 0.5),
+      rgba(238, 244, 255, 0.1) 55%,
+      rgba(255, 60, 172, 0.42)
+    );
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   backdrop-filter: blur(10px);
+  box-shadow: var(--hairline), var(--shadow);
 }
 
 .nitro-label {
@@ -543,16 +723,66 @@ kbd {
   position: relative;
   height: 14px;
   overflow: hidden;
-  border: 1px solid rgba(238, 244, 255, 0.12);
+  border: 1px solid rgba(238, 244, 255, 0.16);
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.55);
+}
+
+/*
+ * Segment separators. These have to be painted by ::after rather than as a
+ * background on .nitro-bar itself: the fill is a child, so a parent background
+ * would sit underneath it and the ticks would only be visible on the empty part
+ * of the bar.
+ */
+.nitro-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, transparent 0 22px, rgba(4, 7, 14, 0.9) 22px 24px);
+  pointer-events: none;
 }
 
 .nitro-fill {
+  position: relative;
   width: 0%;
   height: 100%;
-  background: linear-gradient(90deg, var(--cyan), #7b5cff 55%, var(--magenta));
+  background:
+    repeating-linear-gradient(
+      115deg,
+      rgba(255, 255, 255, 0.14) 0 4px,
+      transparent 4px 11px
+    ),
+    linear-gradient(90deg, var(--cyan), #7b5cff 55%, var(--magenta));
   box-shadow: 0 0 18px rgba(45, 226, 255, 0.55);
   transition: width 0.08s linear;
+}
+
+/*
+ * A single soft band sweeping the bar. Deliberately not a repeating-gradient
+ * background-position animation: that repaints on the main thread every frame,
+ * and a diagonal stripe pattern can never loop seamlessly because its period
+ * along x is not a whole number of pixels. A transform-animated band is
+ * compositor-only and its "seam" is the moment it is off-screen.
+ */
+.nitro-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: nitro-flow 1.5s ease-in-out infinite;
+}
+
+@keyframes nitro-flow {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(350%);
+  }
 }
 
 .nitro-fill.full {
@@ -610,12 +840,33 @@ kbd {
   width: 28px;
   height: 8px;
   border: 1px solid rgba(255, 60, 172, 0.35);
+  border-radius: 2px;
   background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .drift-pips span.on {
+  border-color: rgba(255, 156, 214, 0.9);
   background: linear-gradient(90deg, var(--magenta), #ff9ad5);
-  box-shadow: 0 0 10px rgba(255, 60, 172, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 0 12px rgba(255, 60, 172, 0.7);
+  animation: pip-charge 0.9s ease-out;
+}
+
+/* brightness only — scaling the pip would move its bounding rect mid-animation
+   and the layout probes measure rects. */
+@keyframes pip-charge {
+  from {
+    filter: brightness(2.4);
+  }
+  to {
+    filter: brightness(1);
+  }
 }
 
 .item-cluster {
@@ -627,6 +878,7 @@ kbd {
 }
 
 .item-slot {
+  position: relative;
   width: 72px;
   height: 72px;
   display: grid;
@@ -637,6 +889,7 @@ kbd {
   font-size: 1.6rem;
   font-weight: 900;
   color: rgba(238, 244, 255, 0.35);
+  box-shadow: inset 0 0 22px rgba(155, 107, 255, 0.14);
   transition:
     border-color 0.2s ease,
     box-shadow 0.2s ease;
@@ -646,8 +899,33 @@ kbd {
   border: 2px solid var(--cyan);
   border-style: solid;
   color: var(--ink);
-  box-shadow: 0 0 28px rgba(45, 226, 255, 0.4);
+  text-shadow: 0 0 16px rgba(45, 226, 255, 0.85);
+  box-shadow:
+    inset 0 0 26px rgba(45, 226, 255, 0.25),
+    0 0 28px rgba(45, 226, 255, 0.45);
   animation: item-pulse 1.4s ease-in-out infinite;
+}
+
+/*
+ * Corner brackets, only once an item is held, so the empty slot stays a quiet
+ * dashed placeholder. Inset 8px on purpose: at a 16px corner radius anything
+ * closer to the corner gets sliced by the rounded clip.
+ */
+.item-slot.has-item::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--cyan), var(--cyan)) left top / 11px 2px no-repeat,
+    linear-gradient(var(--cyan), var(--cyan)) left top / 2px 11px no-repeat,
+    linear-gradient(var(--cyan), var(--cyan)) right top / 11px 2px no-repeat,
+    linear-gradient(var(--cyan), var(--cyan)) right top / 2px 11px no-repeat,
+    linear-gradient(var(--cyan), var(--cyan)) left bottom / 11px 2px no-repeat,
+    linear-gradient(var(--cyan), var(--cyan)) left bottom / 2px 11px no-repeat,
+    linear-gradient(var(--cyan), var(--cyan)) right bottom / 11px 2px no-repeat,
+    linear-gradient(var(--cyan), var(--cyan)) right bottom / 2px 11px no-repeat;
+  opacity: 0.85;
 }
 
 .item-label {
@@ -689,31 +967,119 @@ kbd {
   pointer-events: auto;
 }
 
+/*
+ * The menu panel. Three things are stacked in the background rather than added
+ * as elements:
+ *
+ *   1. Four corner brackets, as eight gradient slivers. They live in the
+ *      background layer on purpose — the panel scrolls (overflow: auto), and
+ *      backgrounds are anchored to the border box, so brackets drawn this way
+ *      stay put while the content scrolls under them. As ::before/::after they
+ *      would scroll away on a short viewport.
+ *   2. An opaque surface plus two neon washes.
+ *   3. The edge gradient, clipped to the border box so it only shows in the 1px
+ *      transparent border ring.
+ *
+ * Layer order is top-first, so the clip list has to line up index for index —
+ * everything is clipped to the padding box except the edge gradient. The edge
+ * layer also needs `background-origin: border-box`, or `size: auto` would size
+ * it to the padding box and it would never reach the ring.
+ */
 .panel {
+  position: relative;
   width: min(480px, 100%);
   max-height: min(92vh, 720px);
   overflow: auto;
-  padding: 32px 28px 28px;
-  border: 1px solid rgba(45, 226, 255, 0.22);
+  /* Tight vertical rhythm on purpose: the start panel carries eyebrow, title,
+     mode pills, four track cards, four car cards, settings, controls and two
+     buttons. At 1280x720 the primary CTA has to stay above the fold, so the
+     spacing here is the budget that pays for the taller cards. */
+  padding: 26px 26px 22px;
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  background:
-    linear-gradient(160deg, rgba(45, 226, 255, 0.14), transparent 40%),
-    linear-gradient(320deg, rgba(255, 60, 172, 0.12), transparent 38%),
-    var(--panel-strong);
+  background-color: var(--panel-strong);
+  background-image:
+    /* corner brackets: cyan top-left + bottom-right, magenta the other two */
+    linear-gradient(var(--cyan), var(--cyan)),
+    linear-gradient(var(--cyan), var(--cyan)),
+    linear-gradient(var(--magenta), var(--magenta)),
+    linear-gradient(var(--magenta), var(--magenta)),
+    linear-gradient(var(--magenta), var(--magenta)),
+    linear-gradient(var(--magenta), var(--magenta)),
+    linear-gradient(var(--cyan), var(--cyan)),
+    linear-gradient(var(--cyan), var(--cyan)),
+    /* magenta wash, cyan wash, then the opaque surface underneath both */
+    linear-gradient(320deg, rgba(255, 60, 172, 0.14), transparent 38%),
+    linear-gradient(160deg, rgba(45, 226, 255, 0.17), transparent 42%),
+    linear-gradient(160deg, #141b33, #0a0e1e 52%, #0c1226),
+    linear-gradient(
+      135deg,
+      rgba(45, 226, 255, 0.9),
+      rgba(238, 244, 255, 0.14) 46%,
+      rgba(255, 60, 172, 0.75)
+    );
+  background-position:
+    left 10px top 10px,
+    left 10px top 10px,
+    right 10px top 10px,
+    right 10px top 10px,
+    left 10px bottom 10px,
+    left 10px bottom 10px,
+    right 10px bottom 10px,
+    right 10px bottom 10px,
+    0 0,
+    0 0,
+    0 0,
+    0 0;
+  background-size:
+    24px 2px,
+    2px 24px,
+    24px 2px,
+    2px 24px,
+    24px 2px,
+    2px 24px,
+    24px 2px,
+    2px 24px,
+    auto,
+    auto,
+    auto,
+    auto;
+  background-repeat: no-repeat;
+  background-origin: padding-box, padding-box, padding-box, padding-box, padding-box, padding-box,
+    padding-box, padding-box, padding-box, padding-box, padding-box, border-box;
+  background-clip: padding-box, padding-box, padding-box, padding-box, padding-box, padding-box,
+    padding-box, padding-box, padding-box, padding-box, padding-box, border-box;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    var(--hairline),
     var(--shadow),
-    0 0 60px rgba(45, 226, 255, 0.08);
+    0 0 70px rgba(45, 226, 255, 0.12),
+    0 0 130px rgba(255, 60, 172, 0.08);
   text-align: center;
 }
 
 .eyebrow {
-  margin: 0 0 10px;
+  position: relative;
+  margin: 0 0 12px;
   color: var(--cyan);
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.32em;
   text-transform: uppercase;
+  text-shadow: 0 0 14px rgba(45, 226, 255, 0.55);
+}
+
+/* Hairline rule under the eyebrow — the detail that turns centred text into a
+   masthead. */
+.eyebrow::after {
+  content: '';
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  width: 76px;
+  height: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(90deg, transparent, var(--cyan), var(--magenta), transparent);
+  opacity: 0.8;
 }
 
 .panel h1,
@@ -726,7 +1092,10 @@ kbd {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 0 18px rgba(45, 226, 255, 0.35));
+  /* Stacked drop-shadows: a tight cyan core plus a wide magenta bloom. One
+     shadow reads as a flat blur; two different radii read as neon. */
+  filter: drop-shadow(0 0 10px rgba(45, 226, 255, 0.55))
+    drop-shadow(0 0 34px rgba(255, 60, 172, 0.4));
 }
 
 .lead {
@@ -736,7 +1105,7 @@ kbd {
 }
 
 .controls-list {
-  margin: 18px 0;
+  margin: 12px 0;
   padding: 0;
   list-style: none;
   color: var(--ink);
@@ -767,6 +1136,8 @@ kbd {
  * on those classes; they just have to win.
  */
 .panel > button {
+  position: relative;
+  overflow: hidden;
   min-width: 200px;
   min-height: 48px;
   margin-top: 10px;
@@ -783,12 +1154,50 @@ kbd {
     transform 0.12s ease,
     filter 0.12s ease,
     box-shadow 0.12s ease;
-  box-shadow: 0 8px 24px rgba(45, 226, 255, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 8px 24px rgba(45, 226, 255, 0.22),
+    0 0 40px rgba(255, 60, 172, 0.14);
+}
+
+/*
+ * Sheen sweep, scoped away from .secondary-btn: that one is a translucent dark
+ * pill, and a half-white band across it reads as a glitch rather than a
+ * highlight. `overflow: hidden` on the pill clips the band to the radius.
+ */
+.panel > button:not(.secondary-btn)::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -60%;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.5), transparent);
+  transform: translateX(0) skewX(-18deg);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.panel > button:not(.secondary-btn):hover::after {
+  opacity: 1;
+  animation: btn-sheen 0.7s ease-out;
+}
+
+@keyframes btn-sheen {
+  from {
+    transform: translateX(0) skewX(-18deg);
+  }
+  to {
+    transform: translateX(340%) skewX(-18deg);
+  }
 }
 
 .panel > button:hover {
-  filter: brightness(1.1);
-  box-shadow: 0 10px 28px rgba(45, 226, 255, 0.32);
+  filter: brightness(1.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 10px 30px rgba(45, 226, 255, 0.34),
+    0 0 54px rgba(255, 60, 172, 0.2);
 }
 
 .panel > button:active {
@@ -803,7 +1212,7 @@ kbd {
 }
 
 .settings-block {
-  margin: 16px 0;
+  margin: 12px 0;
   text-align: left;
 }
 
@@ -973,9 +1382,22 @@ kbd {
 
 .finish-stats div {
   padding: 14px 10px;
-  border: 1px solid var(--border-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.03);
+  background-image:
+    linear-gradient(160deg, rgba(24, 32, 58, 0.88), rgba(10, 14, 30, 0.84)),
+    linear-gradient(160deg, rgba(238, 244, 255, 0.22), rgba(238, 244, 255, 0.07));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  box-shadow: var(--hairline-soft);
+}
+
+/* The placing is the headline result, so it gets the gold treatment the "best
+   lap" chip uses elsewhere. */
+.finish-stats div:nth-child(2) {
+  background-image:
+    linear-gradient(160deg, rgba(38, 32, 18, 0.9), rgba(14, 12, 10, 0.84)),
+    linear-gradient(160deg, rgba(255, 209, 102, 0.8), rgba(238, 244, 255, 0.1));
 }
 
 .finish-stats span {
@@ -992,6 +1414,13 @@ kbd {
   margin-top: 6px;
   font-size: 1.05rem;
   font-variant-numeric: tabular-nums;
+  color: #fff;
+  text-shadow: 0 0 14px rgba(45, 226, 255, 0.5);
+}
+
+.finish-stats div:nth-child(2) strong {
+  color: var(--gold);
+  text-shadow: 0 0 16px rgba(255, 209, 102, 0.6);
 }
 
 .countdown {
@@ -1143,24 +1572,30 @@ kbd {
   min-width: 132px;
   min-height: 44px;
   padding: 0 18px;
-  border: 1px solid rgba(45, 226, 255, 0.32);
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: rgba(10, 16, 32, 0.72);
+  background-image:
+    linear-gradient(160deg, rgba(18, 26, 48, 0.9), rgba(8, 12, 26, 0.85)),
+    linear-gradient(160deg, rgba(45, 226, 255, 0.42), rgba(238, 244, 255, 0.1));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   color: var(--muted);
   font-weight: 700;
   /* Used to be inherited from `.panel button`. */
   font-size: 0.95rem;
   letter-spacing: 0.06em;
   cursor: pointer;
+  box-shadow: var(--hairline-soft);
   transition:
-    background 0.15s ease,
     color 0.15s ease,
     box-shadow 0.15s ease,
     transform 0.1s ease;
 }
 
 .mode-btn:hover {
-  border-color: rgba(45, 226, 255, 0.55);
+  background-image:
+    linear-gradient(160deg, rgba(26, 38, 68, 0.92), rgba(10, 16, 34, 0.88)),
+    linear-gradient(160deg, rgba(45, 226, 255, 0.75), rgba(238, 244, 255, 0.14));
   color: var(--ink);
 }
 
@@ -1170,104 +1605,233 @@ kbd {
 
 .mode-btn.active {
   color: #06101c;
-  background: linear-gradient(90deg, var(--cyan), var(--magenta));
-  border-color: transparent;
-  box-shadow: 0 8px 24px rgba(45, 226, 255, 0.28);
+  background-image:
+    linear-gradient(90deg, var(--cyan), var(--magenta)),
+    linear-gradient(90deg, var(--cyan), var(--magenta));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 8px 24px rgba(45, 226, 255, 0.3),
+    0 0 34px rgba(255, 60, 172, 0.18);
 }
 
 .track-picker {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin: 12px 0 8px;
+  margin: 10px 0 6px;
 }
 
+/*
+ * Track card: the real racing line on the left, name and blurb on the right.
+ * The outline comes from TrackPreview.ts, sampled off the same curve the world
+ * is built from, so the card always shows the track you would actually drive.
+ */
 .track-btn {
-  min-height: 56px;
-  padding: 10px 12px;
-  border: 1px solid rgba(45, 226, 255, 0.18);
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  align-items: center;
+  gap: 9px;
+  min-height: 68px;
+  padding: 8px 10px 8px 8px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: rgba(8, 14, 28, 0.72);
+  background-image:
+    linear-gradient(150deg, rgba(20, 28, 52, 0.9), rgba(8, 12, 26, 0.86)),
+    linear-gradient(150deg, rgba(238, 244, 255, 0.18), rgba(238, 244, 255, 0.07));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   color: var(--muted);
   text-align: left;
   cursor: pointer;
+  box-shadow: var(--hairline-soft);
   transition:
-    border-color 0.15s ease,
-    background 0.15s ease,
-    transform 0.1s ease;
+    transform 0.12s ease,
+    box-shadow 0.2s ease;
 }
 
 .track-btn:hover {
-  border-color: rgba(45, 226, 255, 0.4);
-  background: rgba(16, 24, 48, 0.8);
+  background-image:
+    linear-gradient(150deg, rgba(30, 42, 74, 0.92), rgba(12, 18, 38, 0.88)),
+    linear-gradient(150deg, rgba(45, 226, 255, 0.5), rgba(238, 244, 255, 0.1));
 }
 
 .track-btn:active {
   transform: scale(0.98);
 }
 
-.track-btn strong {
+/* --track-a / --track-b / --track-glow are written per card by
+   installTrackPicker(), straight off that layout's own accent pair. */
+.track-btn.active {
+  background-image:
+    linear-gradient(150deg, rgba(24, 38, 68, 0.94), rgba(10, 16, 34, 0.9)),
+    linear-gradient(150deg, var(--track-a, var(--cyan)), var(--track-b, var(--magenta)));
+  box-shadow:
+    var(--hairline),
+    0 0 22px var(--track-glow, rgba(45, 226, 255, 0.28));
+}
+
+.track-meta {
+  display: block;
+  min-width: 0;
+}
+
+.track-meta strong {
   display: block;
   color: var(--ink);
   font-size: 0.9rem;
   font-weight: 700;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.track-btn span {
+.track-meta > span {
   display: block;
   margin-top: 3px;
   font-size: 0.68rem;
   color: var(--muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.track-btn.active {
-  border-color: var(--cyan);
-  background: linear-gradient(135deg, rgba(45, 226, 255, 0.22), rgba(255, 60, 172, 0.16));
-  box-shadow: 0 0 18px rgba(45, 226, 255, 0.18);
-}
-
-.track-btn.active strong {
+.track-btn.active .track-meta strong {
   color: #fff;
+  text-shadow: 0 0 12px var(--track-glow, rgba(45, 226, 255, 0.6));
+}
+
+.track-map {
+  display: block;
+  width: 52px;
+  height: 52px;
+}
+
+.track-map-halo,
+.track-map-line,
+.track-map-flow {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.track-map-halo {
+  stroke: var(--track-a, var(--cyan));
+  stroke-width: 5;
+  opacity: 0.16;
+  transition: opacity 0.2s ease;
+}
+
+/* No `stroke` here on purpose — installTrackPicker() sets it inline to that
+   card's own <linearGradient>, so each track gets a two-tone line. */
+.track-map-line {
+  stroke-width: 1.5;
+  opacity: 0.8;
+  transition: opacity 0.2s ease;
+}
+
+/*
+ * A dash crawling along the line. Only the selected card runs it, so exactly
+ * one SVG in the menu is repainting, and the dash period (4 + 23) matches the
+ * keyframe offset so the loop has no seam.
+ */
+.track-map-flow {
+  stroke: #fff;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 23;
+  opacity: 0;
+}
+
+.track-map-boost {
+  fill: var(--track-b, var(--magenta));
+  opacity: 0.55;
+}
+
+.track-map-start {
+  fill: none;
+  stroke: var(--track-b, var(--magenta));
+  stroke-width: 1.3;
+  opacity: 0.75;
+}
+
+.track-btn:hover .track-map-halo,
+.track-btn.active .track-map-halo {
+  opacity: 0.36;
+}
+
+.track-btn:hover .track-map-line,
+.track-btn.active .track-map-line {
+  opacity: 1;
+}
+
+.track-btn.active .track-map-flow {
+  opacity: 0.95;
+  animation: map-flow 1.7s linear infinite;
+}
+
+.track-btn.active .track-map-start {
+  opacity: 1;
+}
+
+@keyframes map-flow {
+  to {
+    stroke-dashoffset: -27;
+  }
 }
 
 .car-picker {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
-  margin: 10px 0 8px;
+  margin: 8px 0 6px;
 }
 
 .car-btn {
-  min-height: 72px;
+  min-height: 76px;
   padding: 8px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: rgba(8, 14, 28, 0.72);
+  background-image:
+    linear-gradient(150deg, rgba(20, 28, 52, 0.9), rgba(8, 12, 26, 0.86)),
+    linear-gradient(150deg, rgba(238, 244, 255, 0.16), rgba(238, 244, 255, 0.06));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   color: var(--muted);
   text-align: center;
   cursor: pointer;
+  box-shadow: var(--hairline-soft);
   transition:
-    border-color 0.15s ease,
-    background 0.15s ease,
-    transform 0.1s ease;
+    transform 0.12s ease,
+    box-shadow 0.2s ease;
 }
 
 .car-btn:hover {
-  border-color: rgba(255, 255, 255, 0.35);
+  background-image:
+    linear-gradient(150deg, rgba(30, 42, 74, 0.92), rgba(12, 18, 38, 0.88)),
+    linear-gradient(150deg, rgba(255, 255, 255, 0.4), rgba(238, 244, 255, 0.08));
 }
 
 .car-btn:active {
   transform: scale(0.97);
 }
 
+/*
+ * The swatch is the car's livery as a lit orb: two inset shadows (highlight on
+ * top, occlusion underneath) turn the flat dot into a sphere, and an outer
+ * bloom in the accent colour makes it glow. --car-a / --car-b / --car-glow come
+ * from installCarPicker().
+ */
 .car-btn .swatch {
   display: block;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   margin: 0 auto 6px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.35);
-  box-shadow: 0 0 12px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  box-shadow:
+    inset 0 2px 6px rgba(255, 255, 255, 0.45),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.45),
+    0 0 16px var(--car-glow, rgba(255, 255, 255, 0.25));
+  transition: box-shadow 0.2s ease;
 }
 
 .car-btn strong {
@@ -1276,16 +1840,32 @@ kbd {
   color: var(--ink);
 }
 
-.car-btn span {
+.car-btn .car-desc {
   display: block;
   margin-top: 2px;
   font-size: 0.62rem;
 }
 
 .car-btn.active {
-  border-color: var(--cyan);
-  background: linear-gradient(145deg, rgba(45, 226, 255, 0.18), rgba(255, 60, 172, 0.12));
-  box-shadow: 0 0 16px rgba(45, 226, 255, 0.18);
+  background-image:
+    linear-gradient(150deg, rgba(24, 38, 68, 0.94), rgba(10, 16, 34, 0.9)),
+    linear-gradient(150deg, var(--car-a, var(--cyan)), var(--car-b, var(--magenta)));
+  box-shadow:
+    var(--hairline),
+    0 0 20px var(--car-glow, rgba(45, 226, 255, 0.28));
+}
+
+.car-btn.active strong {
+  color: #fff;
+  text-shadow: 0 0 12px var(--car-glow, rgba(45, 226, 255, 0.6));
+}
+
+.car-btn.active .swatch {
+  border-color: rgba(255, 255, 255, 0.75);
+  box-shadow:
+    inset 0 2px 6px rgba(255, 255, 255, 0.5),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.45),
+    0 0 24px var(--car-glow, rgba(255, 255, 255, 0.35));
 }
 
 .duo-only {
@@ -1513,6 +2093,18 @@ body.duo-mode #touch-controls {
 
   .track-picker {
     grid-template-columns: 1fr;
+  }
+
+  /* One card per row, so the racing line gets to be bigger. The panel only ever
+     clips horizontally, and this grows the cards vertically. */
+  .track-btn {
+    grid-template-columns: 56px 1fr;
+    min-height: 72px;
+  }
+
+  .track-map {
+    width: 56px;
+    height: 56px;
   }
 
   .car-picker {

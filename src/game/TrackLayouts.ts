@@ -21,6 +21,8 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
     desc: '均衡弯道 · 适合热身',
     tension: 0.35,
     boostTs: [0.08, 0.22, 0.41, 0.58, 0.77],
+    accentA: '#2de2ff',
+    accentB: '#ff3cac',
     points: [
       [0, 0, 0],
       [36, 0, 4],
@@ -52,6 +54,8 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
     desc: '连续发卡 · 漂移天堂',
     tension: 0.25,
     boostTs: [0.1, 0.25, 0.4, 0.55, 0.7, 0.85],
+    accentA: '#ffb020',
+    accentB: '#ff4d6d',
     points: [
       [0, 0, 0],
       [40, 0, 2],
@@ -91,6 +95,8 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
     desc: '长直道 · 极速冲刺',
     tension: 0.4,
     boostTs: [0.05, 0.18, 0.35, 0.52, 0.68, 0.84],
+    accentA: '#2ea8ff',
+    accentB: '#00e6c3',
     points: [
       [0, 0, 0],
       [70, 0, 0],
@@ -126,6 +132,8 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
     desc: '高低起伏 · 技术弯',
     tension: 0.3,
     boostTs: [0.12, 0.3, 0.48, 0.66, 0.82],
+    accentA: '#7ef29a',
+    accentB: '#9b6bff',
     points: [
       [0, 0, 0],
       [30, 0, 10],
