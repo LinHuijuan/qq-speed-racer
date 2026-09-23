@@ -365,9 +365,16 @@ async function glareStats(page, shot, box) {
   );
   // Inner ring alone: hide the arc and the background track so the only thing
   // left drawing inside the svg is .track-inner.
+  //
+  // `--speed-t` is pinned here for the same reason the bezel pass pins it, and
+  // leaving it out was a bug: the bezel (`.speed-ring::before`) is not hidden in
+  // this pass, and its opacity is `calc(0.45 + var(--speed-t) * 0.55)`. With the
+  // variable live, the two "identical" screenshots straddle a change in it and
+  // the noise floor comes back as a few hundred pixels of the bezel — measured
+  // at 244px on a throttle-held frame, against 0px once pinned.
   const innerPass = await paintPass(
     '06c-ring-inner',
-    '.speed-readout,#speed-arc,.track-bg{visibility:hidden !important}',
+    '.speed-readout,#speed-arc,.track-bg{visibility:hidden !important}#app{--speed-t:1 !important}',
     '.track-inner{display:none !important}',
   );
 
