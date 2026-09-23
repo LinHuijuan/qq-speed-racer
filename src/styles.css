@@ -1507,43 +1507,77 @@ kbd {
   gap: var(--pad-gap);
 }
 
+/*
+ * Touch action buttons.
+ *
+ * These were 45-50% alpha gradients behind a flat grey border, so the dark scene
+ * bled through and desaturated every hue into mud — on the primary control
+ * surface for every phone player, and a visibly different design language from
+ * the rest of the HUD. They now use the same two-layer recipe as .hud-chip: an
+ * opaque surface clipped to padding-box under a neon rim clipped to border-box,
+ * with one hue pair per button driving both the fill tint and the rim.
+ *
+ * Box metrics are deliberately unchanged (the border is still 1px), so the
+ * layout probes keep measuring the same geometry.
+ */
 .touch-actions button {
+  --pad-rgb: 45, 226, 255;
+  --pad-rgb2: 123, 92, 255;
   width: var(--pad-btn-w);
   height: var(--pad-btn-h);
-  border: 1px solid rgba(238, 244, 255, 0.28);
+  border: 1px solid transparent;
   border-radius: 16px;
   color: var(--ink);
   font-weight: 800;
   font-size: 0.82rem;
   pointer-events: auto;
   touch-action: none;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
+  background-image:
+    linear-gradient(160deg, rgba(var(--pad-rgb), 0.4), rgba(8, 12, 24, 0.88)),
+    linear-gradient(160deg, rgba(var(--pad-rgb), 0.95), rgba(var(--pad-rgb2), 0.8));
+  background-origin: border-box, border-box;
+  background-clip: padding-box, border-box;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 6px 18px rgba(0, 0, 0, 0.4),
+    0 0 16px -7px rgba(var(--pad-rgb), 1);
   transition:
     transform 0.08s ease,
-    filter 0.1s ease;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+    filter 0.1s ease,
+    box-shadow 0.15s ease;
 }
 
 .touch-actions button:active {
   transform: scale(0.94);
-  filter: brightness(1.15);
+  filter: brightness(1.25) saturate(1.15);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 4px 14px rgba(0, 0, 0, 0.4),
+    0 0 26px -4px rgba(var(--pad-rgb), 1);
 }
 
 #drift-button {
-  background: linear-gradient(160deg, rgba(255, 60, 172, 0.45), rgba(120, 20, 70, 0.5));
+  --pad-rgb: 255, 60, 172;
+  --pad-rgb2: 155, 107, 255;
 }
 
 #nitro-button {
-  background: linear-gradient(160deg, rgba(45, 226, 255, 0.45), rgba(10, 60, 90, 0.5));
+  --pad-rgb: 45, 226, 255;
+  --pad-rgb2: 123, 92, 255;
 }
 
 #item-button {
-  background: linear-gradient(160deg, rgba(155, 107, 255, 0.45), rgba(50, 20, 90, 0.5));
+  --pad-rgb: 155, 107, 255;
+  --pad-rgb2: 45, 226, 255;
 }
 
+/* Gold reads as "neutral action" here, but the old dark #1a1408 label sat on a
+ * half-transparent gold wash over a dark scene and came out as mud. Light ink
+ * on the darker surface is legible for all four buttons now. */
 #reset-button {
-  background: linear-gradient(160deg, rgba(255, 209, 102, 0.5), rgba(120, 80, 10, 0.5));
-  color: #1a1408;
+  --pad-rgb: 255, 209, 102;
+  --pad-rgb2: 255, 150, 70;
 }
 
 /* Off-track help toast.
@@ -1902,12 +1936,26 @@ body.duo-mode .duo-only {
   z-index: 3;
 }
 
+/*
+ * P2's panel. It was a sharp-cornered rect with a flat 1px gold border, which
+ * made player 2's HUD look like a different app from player 1's — every other
+ * surface in the game is rounded with a gradient rim. Same two-layer recipe as
+ * .hud-chip / .panel: surface clipped to padding-box, rim clipped to border-box.
+ */
 .duo-side {
   min-width: 180px;
   padding: 10px 12px;
-  border: 1px solid rgba(255, 209, 102, 0.4);
-  background: rgba(8, 12, 28, 0.78);
-  backdrop-filter: blur(8px);
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background-image:
+    linear-gradient(180deg, rgba(10, 14, 30, 0.86), rgba(6, 9, 20, 0.92)),
+    linear-gradient(150deg, rgba(255, 209, 102, 0.9), rgba(255, 60, 172, 0.6));
+  background-origin: border-box, border-box;
+  background-clip: padding-box, border-box;
+  backdrop-filter: blur(10px);
+  box-shadow:
+    var(--hairline),
+    0 8px 24px rgba(0, 0, 0, 0.42);
   color: var(--ink);
 }
 
@@ -1944,8 +1992,10 @@ body.duo-mode .duo-only {
   background: linear-gradient(90deg, #ffd166, #ff8a1f, #ff3cac);
 }
 
+/* Empty slot, so it should recede: the base is 0.35 alpha, and 0.55 gold reads
+ * much louder than 0.35 violet because gold is simply brighter. */
 .item-slot.p2-item {
-  border-color: rgba(255, 209, 102, 0.55);
+  border-color: rgba(255, 209, 102, 0.36);
 }
 
 /* Duo split divider hint */
