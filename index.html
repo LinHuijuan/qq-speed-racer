@@ -183,8 +183,13 @@
             </label>
           </div>
           <ul class="controls-list">
-            <li><strong>P1</strong> WASD 转向油门 · Shift 漂移 · 空格 氮气 · E 道具 · <kbd>R</kbd> 回赛道</li>
-            <li class="duo-only"><strong>P2</strong> 方向键 · 右Shift 漂移 · 小键盘0 氮气 · / 道具 · \ 回赛道</li>
+            <li class="hint-keyboard"><strong>P1</strong> WASD 转向油门 · Shift 漂移 · 空格 氮气 · E 道具 · <kbd>R</kbd> 回赛道</li>
+            <li class="hint-keyboard duo-only"><strong>P2</strong> 方向键 · 右Shift 漂移 · 小键盘0 氮气 · / 道具 · \ 回赛道</li>
+            <!-- Same swap as .item-label and #offtrack-help: the list exists to
+                 teach the controls, and on a touch layout the keyboard names are
+                 not merely redundant, they are wrong. The joystick maps x to
+                 steer and -y to throttle (InputController.updatePointer). -->
+            <li class="hint-touch"><strong>P1</strong> 左摇杆 转向油门 · 「漂移」蓄能 · 「氮气」爆发 · 「道具」使用 · 「回道」脱困</li>
           </ul>
           <button id="start-button" type="button">开始比赛</button>
           <button id="continue-button" type="button" class="secondary-btn" style="display:none">继续上次比赛</button>
@@ -240,7 +245,7 @@
           <button id="resume-button" type="button">继续比赛</button>
           <button id="pause-restart-button" type="button" class="secondary-btn">重新开始</button>
           <button id="pause-menu-button" type="button" class="secondary-btn">返回主菜单</button>
-          <p class="hint">按 <kbd>Esc</kbd> 暂停/继续</p>
+          <p class="hint"><span class="hint-keyboard">按 <kbd>Esc</kbd> 暂停/继续</span><span class="hint-touch">点「继续比赛」回到赛道</span></p>
         </div>
       </div>
 

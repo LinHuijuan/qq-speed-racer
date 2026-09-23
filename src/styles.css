@@ -2132,6 +2132,24 @@ body.duo-mode #touch-controls {
     display: inline;
   }
 
+  /*
+   * The menu's controls list carries one wording per layout as well, and it is
+   * the largest of the four — two full lines of key names on a screen that has
+   * no keyboard. The generic rules above are not enough here, because the list
+   * is a <ul> of <li>s rather than a container of spans: a hidden <li> has to
+   * come back as a list item, and `.hint-keyboard` has to beat
+   * `body.duo-mode .duo-only` (both 0,2,0, so source order decides, and this
+   * block is later). Without the first rule the P2 line would reappear in duo
+   * mode — the one mode where the touch pad is hidden outright.
+   */
+  .controls-list .hint-keyboard {
+    display: none;
+  }
+
+  .controls-list .hint-touch {
+    display: list-item;
+  }
+
   .hud-bottom {
     /* Clear the touch pad. Derived from the pad's own height so a change to the
        stick or the button grid can never make the HUD sit on top of the pad. */

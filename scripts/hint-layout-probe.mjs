@@ -151,6 +151,26 @@ for (const vp of VIEWPORTS) {
     };
     const itemLabelVisibleText = visibleChildText('.item-label');
     const offtrackVisibleText = visibleChildText('#offtrack-help');
+    /*
+     * The menu's controls list is the fourth place wording is swapped, and the
+     * largest: it is two full lines of key names. It is a <ul> of <li>s rather
+     * than a container of spans, so `visibleChildText` would fall back to the
+     * container's textContent when every child is hidden — i.e. it would report
+     * the hidden keyboard wording as if it were on screen. Read the list items
+     * directly, and treat "nothing visible" as empty rather than as a fallback.
+     */
+    const visibleListText = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      return Array.from(el.querySelectorAll('li'))
+        .filter((c) => getComputedStyle(c).display !== 'none')
+        .map((c) => c.textContent.trim().replace(/\s+/g, ' '))
+        .join(' | ');
+    };
+    const controlsVisibleText = visibleListText('.controls-list');
+    // The pause hint tells you how to *resume*; on a touch layout the button
+    // that does it is on screen, so an Esc reminder is worse than nothing.
+    const pauseHintVisibleText = visibleChildText('#overlay-pause .hint');
 
     return {
       info,
@@ -160,6 +180,8 @@ for (const vp of VIEWPORTS) {
       itemLabelText: itemLabelVisibleText,
       itemLabelVisible: info['.item-label']?.visible ?? false,
       offtrackText: offtrackVisibleText,
+      controlsText: controlsVisibleText,
+      pauseHintText: pauseHintVisibleText,
       overlaps: collisions,
       // Anything visible that pokes outside the viewport is unusable.
       offscreen: SELECTORS.filter((sel) => {
@@ -179,6 +201,8 @@ for (const vp of VIEWPORTS) {
   console.log(`  drift hint        : ${JSON.stringify(out.hintText)}`);
   console.log(`  item label        : ${JSON.stringify(out.itemLabelText)}`);
   console.log(`  off-track help    : ${JSON.stringify(out.offtrackText)}`);
+  console.log(`  menu controls     : ${JSON.stringify(out.controlsText)}`);
+  console.log(`  pause hint        : ${JSON.stringify(out.pauseHintText)}`);
   console.log(`  collisions        : ${collisions.length ? collisions.join('  |  ') : '(none)'}`);
   console.log(`  offscreen         : ${out.offscreen.length ? out.offscreen.join('  |  ') : '(none)'}`);
   console.log(
@@ -206,6 +230,10 @@ for (const vp of VIEWPORTS) {
       ? /按\s*E|Shift/i.test(out.itemLabelText ?? '')
       : false,
     offtrackKeyboardOnTouch: touch ? /按\s*R|Shift|Esc/i.test(out.offtrackText ?? '') : false,
+    controlsKeyboardOnTouch: touch
+      ? /Shift|WASD|空格|Space|按\s*E/i.test(out.controlsText ?? '')
+      : false,
+    pauseHintKeyboardOnTouch: touch ? /Esc|Shift/i.test(out.pauseHintText ?? '') : false,
   });
   await ctx.close();
 }
@@ -217,7 +245,11 @@ const checks = {};
 for (const r of results) {
   checks[`${r.viewport}_noCollisions`] = r.collisions.length === 0;
   checks[`${r.viewport}_wordingMatchesLayout`] =
-    !r.keyboardWordingOnTouch && !r.itemLabelKeyboardOnTouch && !r.offtrackKeyboardOnTouch;
+    !r.keyboardWordingOnTouch &&
+    !r.itemLabelKeyboardOnTouch &&
+    !r.offtrackKeyboardOnTouch &&
+    !r.controlsKeyboardOnTouch &&
+    !r.pauseHintKeyboardOnTouch;
   checks[`${r.viewport}_nothingOffscreen`] = r.offscreen.length === 0;
   checks[`${r.viewport}_panelsDontClipControls`] = r.panelOverflow.length === 0;
   checks[`${r.viewport}_menuHidesRaceChrome`] =
