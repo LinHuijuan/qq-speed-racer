@@ -2573,6 +2573,11 @@ export class Game {
           boosting: state.isBoosting,
           offTrack: state.offTrack,
           glow: game.player1.kart.glowOpacity,
+          // Signed distance from the centreline (+ is the track's left side)
+          // and the road's half-width, so a probe can assert "back on the
+          // asphalt" as a number instead of inferring it from `offTrack`.
+          lateral: game.track.lateralOffset(state.position, state.progress).lateral,
+          roadHalfWidth: game.track.halfWidth,
         };
       },
       get player2() {

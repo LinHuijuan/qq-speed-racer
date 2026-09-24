@@ -15,6 +15,19 @@ export type KartTuning = {
   driftFriction: number;
   offTrackDrag: number;
   wallBounce: number;
+  /** Per-second speed decay while the kart is touching a barrier. */
+  wallDrag: number;
+  /**
+   * How fast a barrier turns the kart to face along the wall. This is what
+   * stops the car from *pressing* into the barrier: while the heading lags the
+   * wall's tangent, the forward velocity keeps pushing outward and the kart
+   * grinds along the wall instead of coming off it.
+   */
+  wallAlignRate: number;
+  /** m/s at which a touched barrier slides the kart back toward the road. */
+  wallReturnSpeed: number;
+  /** Fraction of the road half-width the return slide pulls the kart back to. */
+  wallReturnEdge: number;
   nitroDrain: number;
   driftCharge: number;
   boostPadStrength: number;
@@ -32,6 +45,10 @@ export const PLAYER_TUNING: KartTuning = {
   driftFriction: 1.4,
   offTrackDrag: 16,
   wallBounce: 0.4,
+  wallDrag: 2.4,
+  wallAlignRate: 9,
+  wallReturnSpeed: 7,
+  wallReturnEdge: 0.9,
   nitroDrain: 0.32,
   driftCharge: 0.52,
   boostPadStrength: 1.2,
@@ -60,6 +77,11 @@ export class PlayerRacer {
   private slowTimer = 0;
   private item: ItemType | null = null;
   private scrapeThisFrame = false;
+  /**
+   * True from the moment the kart touches the barrier band until the
+   * auto-return slide has put it back on the road — see `resolveTrack`.
+   */
+  private wallReturnActive = false;
   private driftScore = 0;
 
   constructor(config?: { color: string; accent: string; name: string; livery?: string }) {
@@ -96,6 +118,7 @@ export class PlayerRacer {
     this.stunTimer = 0;
     this.slowTimer = 0;
     this.item = null;
+    this.wallReturnActive = false;
   }
 
   setBoostFlashHandler(handler: (() => void) | null): void {
@@ -182,6 +205,8 @@ export class PlayerRacer {
     state.isDrifting = false;
     state.offTrack = false;
     state.progress = t;
+    // Already back on the road, so no return slide is owed.
+    this.wallReturnActive = false;
     // Keep some momentum so it doesn't feel like a full stop
     state.speed = Math.min(state.speed, PLAYER_TUNING.maxSpeed * 0.55);
     state.speed = Math.max(state.speed, 12);
@@ -202,6 +227,7 @@ export class PlayerRacer {
     state.offTrack = false;
     state.speed = Math.max(state.speed * 0.55, 12);
     this.driftCharge = 0;
+    this.wallReturnActive = false;
     this.kart.syncTransform(0);
   }
 
@@ -378,16 +404,73 @@ export class PlayerRacer {
     if (Math.abs(lateral) > scrapeZone && Math.abs(lateral) <= wallLimit) {
       this.scrapeThisFrame = true;
     }
-    if (Math.abs(lateral) > wallLimit) {
-      const excess = Math.abs(lateral) - wallLimit;
+    // The clamp below rewrites `lateral`, so everything after it has to work
+    // from the post-clamp value — otherwise a kart pinned against the barrier
+    // looks like it is still a metre past the wall it cannot get through.
+    let resting = Math.abs(lateral);
+    if (resting > wallLimit) {
+      const excess = resting - wallLimit;
       const sign = Math.sign(lateral);
       state.position.addScaledVector(sample.left, -sign * excess);
       state.lateralSpeed *= -PLAYER_TUNING.wallBounce;
-      state.speed *= 0.86;
+      // Per-second decay, not the old per-frame `*= 0.86`. Applied once per
+      // rendered frame that multiplier compounded 60×/s, so a single touch
+      // took the kart from top speed to a dead stop in about half a second —
+      // and at 30 fps the same touch cost half as much. Now the cost is the
+      // same at any frame rate and small enough that a bounce is survivable.
+      state.speed *= Math.exp(-PLAYER_TUNING.wallDrag * delta);
       this.scrapeThisFrame = true;
+      resting = wallLimit;
+    }
+
+    // Barrier contact, and the auto-return to the racing surface.
+    //
+    // The clamp above only stops the kart from *leaving*; on its own it left
+    // the car sitting in the runoff pressed against the barrier with its speed
+    // already gone, so the only way back on the road was to steer out or press
+    // R. While the kart is in the barrier band two things now happen, and both
+    // are needed:
+    //
+    //   1. The barrier straightens the kart to face along the wall. Without
+    //      this the kart's own forward velocity keeps pushing it outward — on
+    //      a tight curve the heading lagged the wall's tangent by enough to
+    //      slide outward at ~7 m/s, which exactly cancelled the return slide
+    //      and left the car pinned for seconds. (This has to run for the whole
+    //      band, not only while the clamp is firing: the slide below moves the
+    //      kart off the clamp line, and if straightening stopped there the car
+    //      simply drifted back into the wall and re-clamped, over and over.)
+    //   2. The kart is slid back toward the centreline at a fixed speed, which
+    //      reads as the barrier spitting it out.
+    //
+    // The slide latches: the trigger is the barrier band (`scrapeZone`,
+    // outside the kerbs) but the slide runs all the way to `wallReturnEdge`
+    // *inside* the road. Without the latch it would switch itself off the
+    // moment the kart crossed back over the scrape line and park it there —
+    // still off the asphalt.
+    //
+    // Deliberately scoped to the barrier band, not to `offTrack` as a whole:
+    // driving wide in the runoff is still the player's own mistake to recover
+    // from, and pulling them out of that too would delete the off-track
+    // penalty.
+    if (resting > scrapeZone) this.wallReturnActive = true;
+    if (this.wallReturnActive) {
       const tangentHeading = Math.atan2(sample.tangent.x, sample.tangent.z);
-      // Real frame delta, not a fixed step — otherwise this is frame-rate dependent.
-      state.heading = THREE.MathUtils.damp(state.heading, tangentHeading, 3.5, Math.max(delta, 1e-4));
+      // Real frame delta, not a fixed step — otherwise this is frame-rate
+      // dependent. Raised from the old hardcoded 3.5 for the reason above.
+      state.heading = THREE.MathUtils.damp(
+        state.heading,
+        tangentHeading,
+        PLAYER_TUNING.wallAlignRate,
+        Math.max(delta, 1e-4),
+      );
+
+      const returnEdge = track.halfWidth * PLAYER_TUNING.wallReturnEdge;
+      const pull = Math.min(PLAYER_TUNING.wallReturnSpeed * delta, resting - returnEdge);
+      if (pull > 0) {
+        state.position.addScaledVector(sample.left, -Math.sign(lateral) * pull);
+      } else {
+        this.wallReturnActive = false;
+      }
     }
 
     return track.collectBoostPad(state.position, 1.4);
