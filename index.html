@@ -137,6 +137,18 @@
               <span class="alert-icon" aria-hidden="true">↩</span>
               <span>逆行 · 请掉头</span>
             </div>
+            <!--
+              The car has stopped, on the track. #offtrack-help covers the case
+              where you left the road and the wrong-way warning covers facing
+              backwards, but a wall bounce usually leaves you on the road and
+              side-on, where neither fires and the throttle does nothing a new
+              player can see. This is the missing third state.
+            -->
+            <div id="stall-hint" class="alert alert-hint" role="status">
+              <span class="alert-icon" aria-hidden="true">!</span>
+              <span class="hint-keyboard">车停了 · 按住 <kbd>W</kbd> 给油，或按 <kbd>R</kbd> 回到赛道</span>
+              <span class="hint-touch">车停了 · 推摇杆给油，或点「回道」</span>
+            </div>
             <div id="action-toast" class="alert alert-hint" role="status"></div>
             <div id="coach-hint" class="alert alert-coach" role="status">
               <span class="alert-badge" id="coach-step"></span>

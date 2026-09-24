@@ -2234,6 +2234,17 @@ body.duo-mode #touch-controls {
   color: #ffe6b0;
 }
 
+/* `.alert-icon` has no base rule — the only other user is the wrong-way pill,
+   which sizes and colours its own under `.alert-danger`. Without this the hint's
+   `!` inherits the pill's 0.85rem body size and sits smaller than the identical
+   glyph in the row above it, in a column where the two are often up together.
+   No pulse: this one is an instruction, not an alarm. */
+.alert-hint .alert-icon {
+  font-size: 1.05rem;
+  line-height: 1;
+  color: #ffd166;
+}
+
 /* First-race coaching. Cyan, and wide enough to hold a sentence — it is the
    only alert that carries an instruction rather than a complaint. */
 .alert-coach {

@@ -77,7 +77,32 @@ for (const vp of VIEWPORTS) {
   await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__.setState('active-play'));
   await page.waitForTimeout(1500);
 
-  const out = await page.evaluate(() => {
+  const out = await page.evaluate((forceAlerts) => {
+    /*
+     * Measure the alert column at its worst case rather than at whatever happens
+     * to be up. All four alerts share one column anchored to the top of
+     * .hud-bottom and grow *upward*, so each row that appears pushes the ones
+     * above it closer to the fixed-height top strip. Measuring only the rows that
+     * are visible on a quiet frame measures the easy case; the stall hint is the
+     * second of four and only ever appears mid-race, when the wrong-way warning
+     * and the coaching line are the ones most likely to be up with it.
+     *
+     * `ALERTS=natural` skips the forcing, to tell a defect that is always there
+     * from one that only the full column produces.
+     */
+    if (forceAlerts)
+      for (const sel of ['#wrong-way', '#stall-hint', '#action-toast', '#coach-hint']) {
+        const el = document.querySelector(sel);
+        if (!el) continue;
+        if (sel === '#action-toast') el.textContent = '氮气还没充满';
+        if (sel === '#coach-hint') {
+          const badge = el.querySelector('#coach-step');
+          const text = el.querySelector('#coach-text');
+          if (badge) badge.textContent = '1/4';
+          if (text) text.textContent = '按住 W（或 ↑）把车跑起来';
+        }
+        el.classList.add('visible');
+      }
     const SELECTORS = [
       '#drift-hint',
       '.nitro-cluster',
@@ -96,6 +121,14 @@ for (const vp of VIEWPORTS) {
       // cover the pad / bottom clusters — that is exactly when the player needs
       // them. It is opacity-animated, so it is measured unconditionally.
       '#offtrack-help',
+      // The stall hint shares #hud-alerts with the wrong-way warning and the
+      // coaching line, so it is measured for the same reason: the column must
+      // stay clear of the clusters below it even when several are up at once.
+      '#stall-hint',
+      // ...and the column as a whole, because it grows upward from .hud-bottom
+      // and the way it fails on a 390px-tall landscape viewport is by reaching
+      // the top of the screen. Container, so it is not a collision surface.
+      '#hud-alerts',
       '#status-line',
     ];
     const rect = (sel) => {
@@ -124,7 +157,25 @@ for (const vp of VIEWPORTS) {
     // Real collisions only: a panel overlapping its own descendants is expected,
     // so ask the DOM whether one contains the other instead of hardcoding pairs.
     const collisions = [];
-    const visibleKeys = SELECTORS.filter((s) => info[s]?.visible);
+    /*
+     * ...and a box that paints nothing is not a surface to collide with.
+     *
+     * `#touch-controls` is a transparent full-width flex row — `pointer-events:
+     * none`, no background, no border — whose whole job is to push the stick and
+     * the action buttons to the two ends of the screen. Its bounding box
+     * therefore includes the empty middle, and the alert column is centred, so
+     * the two always overlap on paper while nothing is anywhere near anything.
+     * With three possible alerts the column stopped short of the pad's band and
+     * this never showed; the stall hint is a fourth row, and the column grew into
+     * it.
+     *
+     * It is kept in SELECTORS because `touchControlsVisible` is read from it —
+     * that is what the wording assertions key off — but it is not measured as a
+     * control. Every control inside it (the stick, the actions cluster, the two
+     * buttons) is listed separately and still collides if a pill reaches it.
+     */
+    const CONTAINERS = new Set(['#touch-controls', '#hud-alerts']);
+    const visibleKeys = SELECTORS.filter((s) => !CONTAINERS.has(s) && info[s]?.visible);
     for (let i = 0; i < visibleKeys.length; i += 1) {
       for (let j = i + 1; j < visibleKeys.length; j += 1) {
         const a = visibleKeys[i];
@@ -151,6 +202,9 @@ for (const vp of VIEWPORTS) {
     };
     const itemLabelVisibleText = visibleChildText('.item-label');
     const offtrackVisibleText = visibleChildText('#offtrack-help');
+    // The stall hint is the third place a new player gets told what to do, and it
+    // is the only one that has to name a control they may not know exists.
+    const stallVisibleText = visibleChildText('#stall-hint');
     /*
      * The menu's controls list is the fourth place wording is swapped, and the
      * largest: it is two full lines of key names. It is a <ul> of <li>s rather
@@ -180,6 +234,7 @@ for (const vp of VIEWPORTS) {
       itemLabelText: itemLabelVisibleText,
       itemLabelVisible: info['.item-label']?.visible ?? false,
       offtrackText: offtrackVisibleText,
+      stallText: stallVisibleText,
       controlsText: controlsVisibleText,
       pauseHintText: pauseHintVisibleText,
       overlaps: collisions,
@@ -191,7 +246,7 @@ for (const vp of VIEWPORTS) {
       }),
       viewport: { w: innerWidth, h: innerHeight },
     };
-  });
+  }, process.env.ALERTS !== 'natural');
 
   const collisions = out.overlaps;
   const touch = out.touchControlsVisible;
@@ -201,6 +256,7 @@ for (const vp of VIEWPORTS) {
   console.log(`  drift hint        : ${JSON.stringify(out.hintText)}`);
   console.log(`  item label        : ${JSON.stringify(out.itemLabelText)}`);
   console.log(`  off-track help    : ${JSON.stringify(out.offtrackText)}`);
+  console.log(`  stall hint        : ${JSON.stringify(out.stallText)}`);
   console.log(`  menu controls     : ${JSON.stringify(out.controlsText)}`);
   console.log(`  pause hint        : ${JSON.stringify(out.pauseHintText)}`);
   console.log(`  collisions        : ${collisions.length ? collisions.join('  |  ') : '(none)'}`);
@@ -212,8 +268,11 @@ for (const vp of VIEWPORTS) {
   for (const [sel, r] of Object.entries(out.info)) {
     if (!r?.visible) continue;
     const off = r.right > out.viewport.w + 0.5 || r.left < -0.5 ? '  <== OFFSCREEN' : '';
+    // Vertical bounds matter as much as horizontal ones: the alert column grows
+    // *upward* from .hud-bottom, so the way it fails is by reaching the fixed
+    // top strip, and the way the pad collides with it is by sharing its y band.
     console.log(
-      `    ${sel.padEnd(20)} x ${String(r.left).padStart(4)}..${String(r.right).padStart(4)}  w=${String(r.right - r.left).padStart(3)}  h=${String(r.bottom - r.top).padStart(3)}${off}`,
+      `    ${sel.padEnd(20)} x ${String(r.left).padStart(4)}..${String(r.right).padStart(4)}  y ${String(r.top).padStart(4)}..${String(r.bottom).padStart(4)}  w=${String(r.right - r.left).padStart(3)}  h=${String(r.bottom - r.top).padStart(3)}${off}`,
     );
   }
 
@@ -230,6 +289,11 @@ for (const vp of VIEWPORTS) {
       ? /按\s*E|Shift/i.test(out.itemLabelText ?? '')
       : false,
     offtrackKeyboardOnTouch: touch ? /按\s*R|Shift|Esc/i.test(out.offtrackText ?? '') : false,
+    // The stall hint names the throttle *and* the way back to the track. On a
+    // touch layout both of those are on-screen buttons, so naming W and R is
+    // worse than useless: it is the one message whose whole job is to say which
+    // control to use, and it would be pointing at controls that do not exist.
+    stallKeyboardOnTouch: touch ? /[WR]|Shift/i.test(out.stallText ?? '') : false,
     controlsKeyboardOnTouch: touch
       ? /Shift|WASD|空格|Space|按\s*E/i.test(out.controlsText ?? '')
       : false,
@@ -248,6 +312,7 @@ for (const r of results) {
     !r.keyboardWordingOnTouch &&
     !r.itemLabelKeyboardOnTouch &&
     !r.offtrackKeyboardOnTouch &&
+    !r.stallKeyboardOnTouch &&
     !r.controlsKeyboardOnTouch &&
     !r.pauseHintKeyboardOnTouch;
   checks[`${r.viewport}_nothingOffscreen`] = r.offscreen.length === 0;

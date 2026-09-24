@@ -649,6 +649,7 @@ export class Game {
     // panel behind the sheet the player is reading.
     if (this.paused || this.helpOpen) return;
     if (this.phase !== 'racing' && this.phase !== 'countdown') return;
+    this.togglePause(true);
   }
 
   /**

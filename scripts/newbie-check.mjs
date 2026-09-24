@@ -15,6 +15,9 @@
  *      layout.
  *   5. The empty item slot not claiming "press E", and a last-place finish
  *      saying something useful.
+ *   6. The three ways a new player ends up motionless or absent — a stopped car
+ *      on the track, the final lap, and a tab switch — and the fact that the
+ *      race stops when they stop watching it.
  *
  *   node scripts/newbie-check.mjs [url]
  *
@@ -199,6 +202,36 @@ function sawToast(log, ...res) {
 /** One-line rendering of a toast log for the assertion message. */
 const describeToastLog = (log) =>
   JSON.stringify(log.map((e) => `${e.initial ? 'was' : e.visible ? 'on' : 'off'}:${e.text}`));
+
+/**
+ * Records every text `#center-banner` shows, for the same reason `armToastLog`
+ * exists: it is one reused element, so reading it afterwards reports whichever
+ * message landed last.
+ *
+ * The lap banner is the worst case for that. The very next `update` compares
+ * ranks and may overwrite it with "↑ 升至第 N" — and completing a lap is exactly
+ * what makes the rank change. A `textContent` read after a `completeLap` is
+ * therefore a race, and it is a race the assertion loses silently, by reporting
+ * a rank flash that looks like a plausible lap message.
+ */
+const armBannerLog = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('#center-banner');
+    window.__BANNER_OBS__?.disconnect();
+    window.__BANNER_LOG__ = [];
+    if (!el) return;
+    const snap = () => {
+      const text = el.textContent.trim();
+      const log = window.__BANNER_LOG__;
+      if (text && log[log.length - 1] !== text) log.push(text);
+    };
+    const obs = new MutationObserver(snap);
+    obs.observe(el, { childList: true, characterData: true, subtree: true });
+    window.__BANNER_OBS__ = obs;
+    snap();
+  });
+
+const bannerLog = (page) => page.evaluate(() => window.__BANNER_LOG__ ?? []);
 
 const hasClass = (page, selector, cls) =>
   page.evaluate(
@@ -552,6 +585,199 @@ await scenario('part 1: the desktop scenario block', async () => {
     JSON.stringify(retired),
   );
 
+  /* --- 12. the final lap is named, not numbered ---------------------- */
+  /*
+   * "第 3 圈" is accurate and tells a first-time player nothing: they have no
+   * idea the race is three laps long, so the one lap where the remaining
+   * distance matters most was the one lap that did not say it.
+   *
+   * Both laps are completed without a rendered frame between them — a frame here
+   * is up to 5 seconds, and `update` drives the same lap callout from the kart's
+   * own progress. But they cannot be completed in the same *task* either:
+   * `showBanner` writes `textContent` on one shared element, and a
+   * MutationObserver callback reads the element rather than the record, so two
+   * writes in one task collapse into one observation and "第 2 圈" is never
+   * logged. The first run of this assertion failed on exactly that, reporting a
+   * rank flash and the final lap with the middle one missing. `setTimeout(0)` is
+   * the task boundary that flushes the observer without giving the renderer a
+   * frame to advance the simulation.
+   */
+  await forceRace();
+  await armBannerLog(page);
+  await page.evaluate(async () => {
+    const hooks = window.__THREE_GAME_TEST_HOOKS__;
+    hooks?.completeLap?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    hooks?.completeLap?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await waitFrames(page, 1);
+  const banners = await bannerLog(page);
+  ok(
+    'the lap before the last is still announced by number',
+    banners.some((t) => /第\s*2\s*圈/.test(t)),
+    JSON.stringify(banners),
+  );
+  ok(
+    'the final lap is called out as the final lap',
+    banners.some((t) => /最后一圈/.test(t)),
+    JSON.stringify(banners),
+  );
+
+  /* --- 13. the race stops when the player stops watching it ---------- */
+  /*
+   * The claim is not "an overlay appears" — it is "the simulation is not still
+   * running". `update` returns early while paused, so `raceTime` is the honest
+   * probe, and `stepSim` is what makes it readable: 60 synthetic steps is one
+   * simulated second, which is a number this environment can produce in
+   * milliseconds and could not produce in a minute of real frames.
+   *
+   * The unpaused run is measured first. Without it, "raceTime did not move" is
+   * also what a broken `stepSim` reports, and the assertion would pass on a game
+   * that never paused.
+   */
+  await forceRace();
+  const clock = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.raceTime ?? 0);
+  await page.evaluate(() => window.__THREE_GAME_TEST_HOOKS__?.stepSim?.(60));
+  const clockAfter = await page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__?.raceTime ?? 0);
+  ok(
+    'setup: 60 simulated steps advance the race clock by one second',
+    Math.abs(clockAfter - clock - 1) < 0.05,
+    `${clock.toFixed(2)} -> ${clockAfter.toFixed(2)}`,
+  );
+
+  await forceRace();
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  const blurred = await page.evaluate(() => {
+    const hooks = window.__THREE_GAME_TEST_HOOKS__;
+    const before = window.__THREE_GAME_DIAGNOSTICS__?.raceTime ?? 0;
+    hooks?.stepSim?.(60);
+    return {
+      paused: document.querySelector('#overlay-pause')?.classList.contains('visible') === true,
+      advanced: (window.__THREE_GAME_DIAGNOSTICS__?.raceTime ?? 0) - before,
+    };
+  });
+  ok(
+    'losing window focus pauses the race instead of letting it run on',
+    blurred.paused && Math.abs(blurred.advanced) < 0.001,
+    JSON.stringify(blurred),
+  );
+
+  await forceRace();
+  const hidden = await page.evaluate(() => {
+    /*
+     * `document.hidden` is a getter on Document.prototype and is read-only in a
+     * real tab, so a dispatched event alone would take the `!document.hidden`
+     * branch and assert nothing. Overriding it on the instance is the only way
+     * to reach the tab-switch path from inside the page; it is restored below.
+     */
+    const proto = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    const paused = document.querySelector('#overlay-pause')?.classList.contains('visible') === true;
+    const before = window.__THREE_GAME_DIAGNOSTICS__?.raceTime ?? 0;
+    window.__THREE_GAME_TEST_HOOKS__?.stepSim?.(60);
+    const advanced = (window.__THREE_GAME_DIAGNOSTICS__?.raceTime ?? 0) - before;
+    // Coming back must not resume: there is no countdown on the way in, so an
+    // automatic resume drops the player straight into a live car mid-corner.
+    window.dispatchEvent(new Event('focus'));
+    const stillPaused =
+      document.querySelector('#overlay-pause')?.classList.contains('visible') === true;
+    if (proto) Object.defineProperty(document, 'hidden', proto);
+    return { paused, advanced, stillPaused };
+  });
+  ok(
+    'hiding the tab pauses the race, and coming back does not resume it',
+    hidden.paused && Math.abs(hidden.advanced) < 0.001 && hidden.stillPaused,
+    JSON.stringify(hidden),
+  );
+
+  /* --- 14. a car that has stopped is told how to go again ------------ */
+  /*
+   * The third way a new player ends up motionless. `#offtrack-help` covers
+   * leaving the road and the wrong-way warning covers facing backwards, but the
+   * ordinary wall bounce leaves the kart *on* the road and side-on to it, where
+   * neither fires and the throttle does nothing they can see.
+   *
+   * The threshold is 2.5 s of race time, which is 50 rendered frames at the
+   * clamped 0.05 delta — one to four minutes here. `stepSim` drives the real
+   * `update` instead, so the accumulation, the off-track gate and the coaching
+   * gate are all the shipped ones and only the clock is synthetic.
+   */
+  const stalledEarly = await page.evaluate(() => {
+    const hooks = window.__THREE_GAME_TEST_HOOKS__;
+    hooks?.forceRace?.();
+    hooks?.stallKart?.();
+    hooks?.stepSim?.(60); // 1.0 s — a hard brake into a hairpin
+    return {
+      visible: document.querySelector('#stall-hint')?.classList.contains('visible') === true,
+      speed: window.__THREE_GAME_DIAGNOSTICS__?.player?.speed ?? -1,
+    };
+  });
+  ok(
+    'a car that has just stopped is not nagged',
+    stalledEarly.visible === false && stalledEarly.speed <= 1.5,
+    JSON.stringify(stalledEarly),
+  );
+
+  const stalledLate = await page.evaluate(() => {
+    window.__THREE_GAME_TEST_HOOKS__?.stepSim?.(120); // +2.0 s = 3.0 s stopped
+    return {
+      visible: document.querySelector('#stall-hint')?.classList.contains('visible') === true,
+      speed: window.__THREE_GAME_DIAGNOSTICS__?.player?.speed ?? -1,
+    };
+  });
+  ok(
+    'a car that has been stopped for three seconds says how to restart it',
+    stalledLate.visible === true,
+    JSON.stringify(stalledLate),
+  );
+
+  /*
+   * The throttle is held for real rather than simulated through a hook, because
+   * `stepSim` calls the same `update` the render loop does and `update` reads the
+   * same input state — so `keyboard.down` plus `stepSim` is the actual driving
+   * path, not an approximation of it.
+   */
+  await page.keyboard.down('KeyW');
+  const restarted = await page.evaluate(() => {
+    window.__THREE_GAME_TEST_HOOKS__?.stepSim?.(30);
+    return {
+      visible: document.querySelector('#stall-hint')?.classList.contains('visible') === true,
+      speed: window.__THREE_GAME_DIAGNOSTICS__?.player?.speed ?? -1,
+    };
+  });
+  await page.keyboard.up('KeyW');
+  ok(
+    'the stall hint clears as soon as the car is moving again',
+    restarted.visible === false && restarted.speed > 1.5,
+    JSON.stringify(restarted),
+  );
+
+  /*
+   * Two boxes saying the same thing is worse than one. Coaching step 1 is
+   * already telling the player to hold the throttle, which is the exact
+   * instruction the stall hint carries — and a player who is reading step 1 is
+   * by definition a player who has not driven yet, so this is not a rare overlap.
+   */
+  const coached = await page.evaluate(() => {
+    const hooks = window.__THREE_GAME_TEST_HOOKS__;
+    hooks?.forceRace?.();
+    hooks?.setCoachStep?.(1);
+    hooks?.stallKart?.();
+    hooks?.stepSim?.(180); // 3.0 s, well past the stall threshold
+    return {
+      stall: document.querySelector('#stall-hint')?.classList.contains('visible') === true,
+      coach: document.querySelector('#coach-hint')?.classList.contains('visible') === true,
+      step: window.__THREE_GAME_DIAGNOSTICS__?.coach?.step,
+    };
+  });
+  ok(
+    'the stall hint stays out of the way while coaching is asking for the throttle',
+    coached.step === 1 && coached.coach === true && coached.stall === false,
+    JSON.stringify(coached),
+  );
+
   await ctx.close();
 });
 
@@ -617,6 +843,30 @@ for (const vp of viewports) {
       `${vp.name}_helpCopyMatchesLayout`,
       padShown ? !/Shift|空格/.test(helpCopy ?? '') : /Shift/.test(helpCopy ?? ''),
       `pad=${padShown} ${JSON.stringify(helpCopy)}`,
+    );
+
+    /*
+     * The stall hint is the fifth place wording is swapped, and the only one
+     * whose whole job is to name the control to use — it is the message a player
+     * reads while already stuck, so pointing at a key they do not have is worse
+     * than saying nothing. Read the visible child rather than the container:
+     * both wordings live inside #stall-hint and the container's textContent
+     * carries both, which is how a wording assertion passes on every layout.
+     */
+    const stallCopy = await page.evaluate(() => {
+      const el = document.querySelector('#stall-hint');
+      if (!el) return null;
+      return Array.from(el.children)
+        .filter((c) => getComputedStyle(c).display !== 'none')
+        .map((c) => c.textContent.trim().replace(/\s+/g, ' '))
+        .join(' ');
+    });
+    ok(
+      `${vp.name}_stallCopyMatchesLayout`,
+      padShown
+        ? /摇杆/.test(stallCopy ?? '') && !/[WR]/.test(stallCopy ?? '')
+        : /W/.test(stallCopy ?? '') && /R/.test(stallCopy ?? '') && !/摇杆/.test(stallCopy ?? ''),
+      `pad=${padShown} ${JSON.stringify(stallCopy)}`,
     );
 
     const geom = await page.evaluate(() => {

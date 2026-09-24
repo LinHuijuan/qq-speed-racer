@@ -26,6 +26,12 @@ declare global {
       finishLast?: () => { rank: number };
       openHelp?: () => { open: boolean };
       closeHelp?: () => { open: boolean };
+      /** Zero the player's speed without moving it, to exercise the stall hint. */
+      stallKart?: () => { speed: number };
+      /** Advance the player one lap and fire the lap banner, without driving it. */
+      completeLap?: () => { lap: number };
+      /** Run N fixed 1/60 s simulation steps without waiting on the renderer. */
+      stepSim?: (frames?: number) => { frames: number };
       setPausedForScreenshot: (paused: boolean) => void;
       setReducedMotion: (enabled: boolean) => void;
       hideDebugUi: (hidden: boolean) => void;

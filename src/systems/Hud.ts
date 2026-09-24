@@ -73,6 +73,7 @@ export class Hud {
   private readonly itemSlot = this.el('#item-slot');
   private readonly itemLabel = this.el('#item-label');
   private readonly wrongWay = this.el('#wrong-way');
+  private readonly stallHint = this.el('#stall-hint');
   private readonly actionToast = this.el('#action-toast');
   private readonly coachHint = this.el('#coach-hint');
   private readonly coachStep = this.el('#coach-step');
@@ -142,6 +143,7 @@ export class Hud {
   private lastActionText = '';
   private lastActionAt = Number.NEGATIVE_INFINITY;
   private wrongWayShown = false;
+  private stallShown = false;
   /** `step/total|text` — one key, so a repeat frame costs nothing. */
   private coachKey = '';
 
@@ -312,6 +314,16 @@ export class Hud {
     if (visible === this.wrongWayShown) return;
     this.wrongWayShown = visible;
     this.wrongWay.classList.toggle('visible', visible);
+  }
+
+  /**
+   * "The car has stopped." Same contract as `setWrongWay`: the caller pushes
+   * every frame and the cache keeps that free.
+   */
+  setStall(visible: boolean): void {
+    if (visible === this.stallShown) return;
+    this.stallShown = visible;
+    this.stallHint.classList.toggle('visible', visible);
   }
 
   /**
