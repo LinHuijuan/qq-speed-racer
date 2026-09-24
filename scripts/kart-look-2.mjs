@@ -123,6 +123,22 @@ const angles = [
   // tint, helmet, roll hoop, wing struts).
   { name: 'detail-nose', pos: at(0.85, 0.72, 1.55), look: at(0, 0.44, 1.0) },
   { name: 'detail-cockpit', pos: at(1.25, 1.35, 1.15), look: at(0, 0.84, 0.02) },
+  /*
+   * The real chase rig, so the harness can answer "does any of this detail
+   * survive the camera the player actually has?".
+   *
+   * CameraRig at race speed: distance = 7.2 + clamp(speed*0.06, 0, 2.4), height
+   * = 2.35 + clamp(speed*0.01, 0, 0.5), and it looks at the car plus
+   * (4.2 + speed*0.08) forward. At speed 40 that is 9.6 back, 2.75 up, aiming
+   * 7.4 ahead. The free camera inherits whatever fov the rig last wrote
+   * (58 + clamp((speed-8)*0.22, 0, 12) ~= 65 at speed 40), so this framing is
+   * faithful rather than approximate.
+   *
+   * The answer, measured on the shot: the 1.2m-wide kart lands at roughly 5% of
+   * a 1280px frame — about 60px. Silhouette and light signature read; nothing
+   * smaller than about 5cm does.
+   */
+  { name: 'chase', pos: at(0, 2.75, -9.6), look: at(0, 0.85, 7.4) },
 ];
 
 const liveries = ['neon-blue', 'crimson', 'gold', 'violet'];

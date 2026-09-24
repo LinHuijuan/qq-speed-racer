@@ -490,6 +490,33 @@ function buildBodyGeometries(): BodyGeometries {
         geo: new THREE.BoxGeometry(0.09, 0.05, 0.5),
         pos: [0, 0.585, 0.91],
       },
+      // Engine-bay louvres — four slats across the rear deck. That deck is the
+      // pan's top face (y = 0.56) behind the upper hull, z -0.809..-1.175, and
+      // it is the one flat plane the chase camera looks down at for the whole
+      // race, so it is worth more than its size suggests. Tilted 0.4 rad so
+      // they read as vents rather than as stripes, and kept 1.02 wide so they
+      // clear the rear fender arches, which occupy x 0.60..0.72 and whose
+      // underside drops to y 0.60 at z = -0.86.
+      {
+        geo: new THREE.BoxGeometry(1.02, 0.018, 0.06),
+        pos: [0, 0.575, -0.86],
+        rot: [-0.4, 0, 0],
+      },
+      {
+        geo: new THREE.BoxGeometry(1.02, 0.018, 0.06),
+        pos: [0, 0.575, -0.925],
+        rot: [-0.4, 0, 0],
+      },
+      {
+        geo: new THREE.BoxGeometry(1.02, 0.018, 0.06),
+        pos: [0, 0.575, -0.99],
+        rot: [-0.4, 0, 0],
+      },
+      {
+        geo: new THREE.BoxGeometry(1.02, 0.018, 0.06),
+        pos: [0, 0.575, -1.055],
+        rot: [-0.4, 0, 0],
+      },
       // Rear diffuser — three vertical fins below the rear deck. The center
       // fin is wider; the outer two step back slightly so the silhouette
       // tapers like a real diffuser rather than a flat wall.
@@ -663,27 +690,64 @@ function buildWheelGeometries(radius: number): WheelGeometries {
   for (const face of [0.1, -0.1]) {
     for (let i = 0; i < 5; i += 1) {
       const angle = (i / 5) * Math.PI * 2;
-      rimParts.push({
-        geo: new THREE.BoxGeometry(radius * 0.95, 0.045, 0.06),
-        pos: [0, face, 0],
-        rot: [0, angle, 0],
-      });
+      /*
+       * A radial ARM, not a bar through the centre.
+       *
+       * The previous version was `BoxGeometry(radius * 0.95, ...)` centred on
+       * the origin, so each "spoke" was a full diameter — five of them at 72
+       * degrees, times two faces, is ten bars crossing at the hub. At radius
+       * 0.06r the gap between neighbours is 0.038r while each bar is 0.06r
+       * wide, so they overlapped and the middle of the wheel was solid. The
+       * barrel and hub behind them never showed; a dye test with the rim
+       * painted green filled the whole wheel interior.
+       *
+       * `translate` moves the box along its own long axis BEFORE `mergeParts`
+       * rotates it about Y, so the arm runs from 0.14r to 0.58r and meets the
+       * lip ring, leaving a real gap between neighbours for the rotor to show
+       * through. A fresh geometry per arm because mergeParts disposes them.
+       */
+      const arm = new THREE.BoxGeometry(radius * 0.44, 0.04, 0.04);
+      arm.translate(radius * 0.36, 0, 0);
+      rimParts.push({ geo: arm, pos: [0, face, 0], rot: [0, angle, 0] });
     }
   }
 
   return {
     tire: new THREE.LatheGeometry(tirePoints, 20),
+    /*
+     * NO `rot` on the barrel or the hub. This is the whole point of the frame:
+     * CylinderGeometry's axis is +Y, the tyre lathe is also around +Y, and the
+     * wheel mesh's own `rotation.z = pi/2` is what carries both of them onto
+     * the car's lateral axis. Rotating the cylinder a further pi/2 about Z put
+     * its axis along the wheel PLANE instead — a disc lying flat inside the
+     * tyre and a vertical rod standing through the hub.
+     *
+     * Measured, with the wheel's rotation applied, as a world bounding box
+     * (X = lateral, Y = up, Z = fore/aft):
+     *
+     *   barrel  rot [0,0,pi/2]   X 0.295  Y 0.16   Z 0.30    <- flat disc
+     *   barrel  no rot           X 0.16   Y 0.295  Z 0.30    <- on the axle
+     *   hub     rot [0,0,pi/2]   X 0.108  Y 0.24   Z 0.108   <- vertical rod
+     *   hub     no rot           X 0.24   Y 0.108  Z 0.108   <- on the axle
+     *
+     * The symptom was subtle: the barrel is the dark disc the spokes are
+     * supposed to stand in front of, so with it lying flat the wheel had
+     * nothing behind the spokes and you could see straight through to the far
+     * side. From outside that reads as "a pale see-through octagon", not as a
+     * missing part.
+     */
     barrel: mergeParts([
       {
         geo: new THREE.CylinderGeometry(radius * 0.5, radius * 0.5, 0.16, 18),
-        rot: [0, 0, Math.PI / 2],
       },
     ]),
     rim: mergeParts(rimParts),
     hub: mergeParts([
       {
-        geo: new THREE.CylinderGeometry(radius * 0.18, radius * 0.18, 0.24, 12),
-        rot: [0, 0, Math.PI / 2],
+        // 0.26 long, so the cap stands 0.01 proud of the spoke arms (which
+        // occupy |y| 0.08..0.12). At the previous 0.24 it was flush and simply
+        // vanished into the middle of the wheel.
+        geo: new THREE.CylinderGeometry(radius * 0.18, radius * 0.18, 0.26, 12),
       },
     ]),
     /*
@@ -694,10 +758,11 @@ function buildWheelGeometries(radius: number): WheelGeometries {
      * that I got wrong twice. A RingGeometry's normal is its +Z, so the
      * mapping is one rotation: `rot.x = -π/2` sends +Z to +Y, which is the
      * wheel's local axis — the ring then lies in the wheel's plane. Two of
-     * them, one per face at ±0.105 (just proud of the 0.2-deep rim disc), so
-     * both sides of the kart show a lit ring. The second is flipped +π/2 so
-     * its front face points the other way; a RingGeometry is single-sided and
-     * would otherwise be invisible from outside.
+     * them, one per face at ±0.09, which is just outside the 0.16-deep barrel
+     * (|y| ≤ 0.08) and just inside the spokes (±0.10) — so both sides of the
+     * kart show a lit ring seen through the spokes. The second is flipped +π/2
+     * so its front face points the other way; a RingGeometry is single-sided
+     * and would otherwise be invisible from outside.
      */
     glowRing: mergeParts([
       {
@@ -804,11 +869,17 @@ export class Kart {
       ),
       barrel: this.track(
         new THREE.MeshStandardMaterial({
-          color: '#1a2029',
-          roughness: 0.45,
-          metalness: 0.65,
+          // The barrel is the dark backdrop the bright spokes are supposed to
+          // stand out against, so it has to stay DARK. It was `metalness: 0.65`
+          // with `envMapIntensity: 0.7`, and once the envMap went on the kart
+          // that turned it into a pale blue-grey mirror of the skyglow —
+          // nearly as bright as the chrome spokes in front of it, which is why
+          // the wheel read as one flat disc. Matte and barely reflective now.
+          color: '#12161d',
+          roughness: 0.72,
+          metalness: 0.18,
           envMap: env,
-          envMapIntensity: 0.7,
+          envMapIntensity: 0.15,
         }),
       ),
       rim: this.track(
@@ -816,6 +887,15 @@ export class Kart {
           color: '#c8d4e8',
           roughness: 0.22,
           metalness: 0.88,
+          // A little self-lit, deliberately. At metalness 0.88 the spokes are
+          // almost pure specular, and specular needs something to reflect — the
+          // scene has four lights and no IBL, so seen against the emissive
+          // rotor behind them the spokes read as black silhouettes rather than
+          // as metal. This lift is 0.376 * 0.5 = 0.19 luminance, far below the
+          // 0.72 bloom threshold, so it brightens the spokes without adding to
+          // the glow budget.
+          emissive: '#54617a',
+          emissiveIntensity: 0.5,
           envMap: env,
           envMapIntensity: 1.2,
         }),
