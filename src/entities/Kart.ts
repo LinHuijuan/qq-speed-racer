@@ -335,17 +335,23 @@ function buildBodyGeometries(): BodyGeometries {
         pos: [0, 0.21, BODY_LENGTH * 0.5 + 0.29],
         rot: [-0.08, 0, 0],
       },
-      // Canopy seal — a thin lit frame around the canopy base, 0.64x0.88
-      // against the canopy's 0.56x0.80, so it reads as a bezel rather than
-      // another panel. Added because the smoked canopy, seen from above or
-      // from behind, rendered as a featureless black hole: a dark tint with
-      // transmission reflects the dark sky and refracts the dark road, so
-      // there was nothing for the eye to catch on. The frame gives it an
-      // edge, and it matches the canopy's own -0.12 rad tilt.
+      // Canopy seal — the lit bezel the glass sits in. This began as a
+      // 0.64x0.88 flat plate, which read as a bright RECTANGLE with the dome
+      // parked on it: seen from above a 2cm-thick plate shows its whole top
+      // face, and a rectangle around an ellipse is nothing but corners. It is a
+      // squashed torus now, so the band follows the dome instead of boxing it.
+      //
+      // TorusGeometry(1, 0.06) lies in the XY plane, so -pi/2 about X lays the
+      // ring into XZ. The scale is applied in the torus's own frame: local X ->
+      // world X (0.30 semi-axis), local Y -> world -Z (0.42), local Z -> world
+      // Y (so the band stands 2*0.06*0.22 = 0.026 tall). The extra -0.12 on the
+      // X rotation matches the dome's own forward tilt, keeping the band
+      // parallel to the glass it surrounds.
       {
-        geo: new THREE.BoxGeometry(0.64, 0.022, 0.88),
-        pos: [0, 0.795, 0.0],
-        rot: [-0.12, 0, 0],
+        geo: new THREE.TorusGeometry(1, 0.06, 6, 32),
+        pos: [0, 0.8, 0.0],
+        rot: [-Math.PI / 2 - 0.12, 0, 0],
+        scale: [0.3, 0.42, 0.22],
       },
       // Side skirts (kept — these are the slim accent bars down each flank).
       {
@@ -460,6 +466,29 @@ function buildBodyGeometries(): BodyGeometries {
         geo: new THREE.BoxGeometry(BODY_WIDTH * 0.18, 0.022, 0.18),
         pos: [BODY_WIDTH * 0.56, 0.36, BODY_LENGTH * 0.34],
         rot: [0.12, 0, -0.35],
+      },
+      // Front-deck strakes — two low rails down the nose. The deck is the
+      // chassis pan's top face (y = 0.56) between the upper hull's front edge
+      // (z = 0.649) and the nose tip's step down (z = 1.175): 1.2 x 0.53 of
+      // unbroken flat plane, and the last place on the car that still read as
+      // a slab from a three-quarter view. They stop at x = +-0.40 rather than
+      // outboard because the front fender arches occupy x 0.56..0.68 from
+      // y 0.62 upward — anything wider would run straight into them.
+      {
+        geo: new THREE.BoxGeometry(0.05, 0.035, 0.5),
+        pos: [-0.4, 0.575, 0.91],
+      },
+      {
+        geo: new THREE.BoxGeometry(0.05, 0.035, 0.5),
+        pos: [0.4, 0.575, 0.91],
+      },
+      // Centre keel, taller and wider than the rails so the three read as a
+      // hierarchy (keel > channels) rather than as a grille. It also lines up
+      // with the hood LED behind it, which is why the nose gets a spine and
+      // not a second pair of rails.
+      {
+        geo: new THREE.BoxGeometry(0.09, 0.05, 0.5),
+        pos: [0, 0.585, 0.91],
       },
       // Rear diffuser — three vertical fins below the rear deck. The center
       // fin is wider; the outer two step back slightly so the silhouette
