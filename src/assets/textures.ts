@@ -15,7 +15,9 @@ export function loadGameTexture(
   const hit = cache.get(key);
   if (hit) return hit;
 
-  const tex = loader.load(url);
+  // 将根绝对路径（/assets/...）转为相对 base，兼容 GitHub Pages 子路径
+  const resolvedUrl = url.replace(/^\//, import.meta.env.BASE_URL);
+  const tex = loader.load(resolvedUrl);
   tex.colorSpace = opts.srgb === false ? THREE.NoColorSpace : THREE.SRGBColorSpace;
   if (opts.wrap) {
     tex.wrapS = opts.wrap;
