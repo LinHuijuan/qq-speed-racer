@@ -74,6 +74,117 @@ function glowTexture(): THREE.Texture {
   return texture;
 }
 
+let envTextureCache: THREE.Texture | null = null;
+
+/**
+ * A tiny procedural night-city environment, used as the kart's `envMap`.
+ *
+ * The problem it solves: MeshPhysicalMaterial's clearcoat, `iridescence` and
+ * `transmission` are all driven by *specular reflection*, and specular
+ * reflection needs something to reflect. The scene has four lights and no
+ * `scene.environment`, so a low-roughness surface facing away from every light
+ * reflects black. That is why the smoked canopy read as a hole no matter what
+ * tint it was given, and why `iridescence: 0.65` changed literally nothing.
+ *
+ * Built as an equirectangular canvas rather than a PMREM from the real scene:
+ * a PMREM needs the renderer (which Kart does not have) and would bake the
+ * whole neon city into a texture that changes with the camera. A fixed
+ * gradient costs one 512x256 upload, is shared by every kart and every livery,
+ * and only ever needs to be plausible — reflections are read as "there is a
+ * city out there", not as a specific building.
+ *
+ * Layout, in equirect terms (x = azimuth, y = elevation):
+ *   top    -> zenith, near-black navy
+ *   middle -> horizon, a magenta-to-cyan band with a few soft light blobs
+ *   bottom -> nadir, near-black (the road)
+ */
+function envTexture(): THREE.Texture {
+  if (envTextureCache) return envTextureCache;
+  const width = 512;
+  const height = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const sky = ctx.createLinearGradient(0, 0, 0, height);
+    sky.addColorStop(0, '#05070f');
+    sky.addColorStop(0.32, '#0b1226');
+    sky.addColorStop(0.44, '#1d1038');
+    sky.addColorStop(0.5, '#3a1050');
+    sky.addColorStop(0.56, '#2a1230');
+    sky.addColorStop(0.68, '#120b1a');
+    sky.addColorStop(1, '#04050a');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, width, height);
+
+    /*
+     * Skyglow. A night city is never actually black overhead — light pollution
+     * plus neon bouncing off the haze leaves the zenith a soft indigo wash.
+     * This matters far more than it looks. A *horizontal* surface (the canopy
+     * roof, seen from above) reflects the zenith, so with a black zenith the
+     * canopy had literally nothing to show and read as a hole no matter how
+     * the tint was tuned. The first version of this texture put every light at
+     * the horizon, which only ever helped grazing angles.
+     */
+    const glow = ctx.createRadialGradient(
+      width * 0.5,
+      height * 0.02,
+      0,
+      width * 0.5,
+      height * 0.02,
+      height * 0.7,
+    );
+    glow.addColorStop(0, 'rgba(104, 126, 208, 0.55)');
+    glow.addColorStop(0.45, 'rgba(58, 66, 140, 0.28)');
+    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, width, height);
+
+    // Sharp glints *above* the horizon — reflected streetlights and signage,
+    // the things that give a curved surface a highlight. Spread across several
+    // elevations so the specular sweeps as the canopy's normals sweep.
+    const glints = [
+      [0.14, 0.1, 26, 'rgba(200, 226, 255, 0.75)'],
+      [0.42, 0.2, 18, 'rgba(255, 236, 214, 0.7)'],
+      [0.68, 0.13, 22, 'rgba(190, 214, 255, 0.65)'],
+      [0.86, 0.28, 15, 'rgba(255, 210, 232, 0.6)'],
+      [0.28, 0.33, 13, 'rgba(214, 236, 255, 0.55)'],
+    ] as const;
+    for (const [x, y, r, color] of glints) {
+      const gradient = ctx.createRadialGradient(x * width, y * height, 0, x * width, y * height, r);
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    // Soft city lights along the horizon. These are what a canopy catches at
+    // grazing angles, i.e. from the driver's-eye and side views.
+    const lights = [
+      [0.06, 0.5, 70, 'rgba(255, 42, 109, 0.85)'],
+      [0.2, 0.46, 46, 'rgba(45, 226, 255, 0.8)'],
+      [0.33, 0.52, 58, 'rgba(255, 209, 102, 0.7)'],
+      [0.47, 0.47, 40, 'rgba(224, 64, 251, 0.8)'],
+      [0.6, 0.51, 64, 'rgba(45, 226, 255, 0.75)'],
+      [0.74, 0.45, 44, 'rgba(255, 42, 109, 0.8)'],
+      [0.88, 0.53, 54, 'rgba(224, 64, 251, 0.7)'],
+    ] as const;
+    for (const [x, y, r, color] of lights) {
+      const gradient = ctx.createRadialGradient(x * width, y * height, 0, x * width, y * height, r);
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, width, height);
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  envTextureCache = texture;
+  return texture;
+}
+
 /**
  * Parts are merged per material so one kart costs ~22 draw calls instead of ~55.
  * The local transforms below mirror the original per-mesh placement exactly, so
@@ -83,6 +194,9 @@ type PlacedPart = {
   geo: THREE.BufferGeometry;
   pos?: [number, number, number];
   rot?: [number, number, number];
+  /** Non-uniform scale, applied before the rotation. Lets one primitive stand
+   *  in for a whole family of shapes — the canopy is a squashed sphere. */
+  scale?: [number, number, number];
 };
 
 function mergeParts(parts: PlacedPart[]): THREE.BufferGeometry {
@@ -97,6 +211,7 @@ function mergeParts(parts: PlacedPart[]): THREE.BufferGeometry {
     euler.set(part.rot?.[0] ?? 0, part.rot?.[1] ?? 0, part.rot?.[2] ?? 0);
     quaternion.setFromEuler(euler);
     position.set(part.pos?.[0] ?? 0, part.pos?.[1] ?? 0, part.pos?.[2] ?? 0);
+    scale.set(part.scale?.[0] ?? 1, part.scale?.[1] ?? 1, part.scale?.[2] ?? 1);
     matrix.compose(position, quaternion, scale);
     geometry.applyMatrix4(matrix);
     return geometry;
@@ -220,6 +335,18 @@ function buildBodyGeometries(): BodyGeometries {
         pos: [0, 0.21, BODY_LENGTH * 0.5 + 0.29],
         rot: [-0.08, 0, 0],
       },
+      // Canopy seal — a thin lit frame around the canopy base, 0.64x0.88
+      // against the canopy's 0.56x0.80, so it reads as a bezel rather than
+      // another panel. Added because the smoked canopy, seen from above or
+      // from behind, rendered as a featureless black hole: a dark tint with
+      // transmission reflects the dark sky and refracts the dark road, so
+      // there was nothing for the eye to catch on. The frame gives it an
+      // edge, and it matches the canopy's own -0.12 rad tilt.
+      {
+        geo: new THREE.BoxGeometry(0.64, 0.022, 0.88),
+        pos: [0, 0.795, 0.0],
+        rot: [-0.12, 0, 0],
+      },
       // Side skirts (kept — these are the slim accent bars down each flank).
       {
         geo: new THREE.BoxGeometry(0.06, 0.05, BODY_LENGTH * 0.5),
@@ -262,7 +389,8 @@ function buildBodyGeometries(): BodyGeometries {
       // roll bar. A hoop has to stand up: no X rotation, so the arc runs
       // +X → -X over +Y, straddling the cockpit. Radius 0.32 spans 0.64,
       // just wider than the 0.56 canopy, and the 0.8 base height puts the
-      // crown at 1.12 — 0.13 above the canopy.
+      // crown at 1.12 — above the canopy dome's 0.98 apex, so the hoop is
+      // still the tallest point on the car.
       {
         geo: new THREE.TorusGeometry(0.32, 0.032, 8, 20, Math.PI),
         pos: [0, 0.8, -0.42],
@@ -368,13 +496,26 @@ function buildBodyGeometries(): BodyGeometries {
       { geo: new THREE.BoxGeometry(0.04, 0.16, 0.5), pos: [BODY_WIDTH * 0.42, 0.62, 0.05] },
     ]),
     glass: mergeParts([
-      // The old canopy was a 0.58×0.1×0.4 slab that read as a thin lid. This
-      // one is tilted forward 0.12 rad so the front face acts as a windshield.
-      // Trimmed from 0.6×0.24×0.86 to 0.56×0.2×0.8 — at the larger size it
-      // looked like a glass brick parked on the hull rather than a cockpit.
+      /*
+       * Canopy. A BOX was the wrong primitive and no amount of material work
+       * could rescue it: a flat top face has a single normal, so it reflects a
+       * single direction and resolves to one uniform colour — a slab, from any
+       * angle. Glass reads as glass because its normals *sweep*, dragging a
+       * gradient of reflections across the surface.
+       *
+       * So: a sphere squashed into an elongated dome — 0.56 wide, 0.80 long,
+       * 0.16 above the equator. The equator sits at y = 0.82, exactly the
+       * cockpit shell's top face, and the dome is narrower in plan (0.56x0.80)
+       * than the shell (0.72x0.85) — so the entire lower hemisphere is inside
+       * the opaque shell and killed by the depth test. Only the upper half is
+       * ever visible, which is precisely the shape a canopy should be.
+       *
+       * Tilted -0.12 rad about X so the front slope reads as a windshield.
+       */
       {
-        geo: new THREE.BoxGeometry(0.56, 0.2, 0.8),
-        pos: [0, 0.89, 0.0],
+        geo: new THREE.SphereGeometry(1, 24, 12),
+        pos: [0, 0.82, 0.0],
+        scale: [0.28, 0.16, 0.4],
         rot: [-0.12, 0, 0],
       },
     ]),
@@ -605,19 +746,50 @@ export class Kart {
 
   constructor(private readonly config: KartConfig) {
     this.name = config.name;
+    /*
+     * One shared procedural environment for the whole car — the texture itself is
+     * cached in `envTextureCache`, so both this and the copy in `createBody()`
+     * resolve to the same GPU upload.
+     *
+     * It has to be declared *here* as well, because the wheel materials below are
+     * built in the constructor, not in `createBody()`. Without an envMap a
+     * `MeshPhysicalMaterial`'s specular features (clearcoat, iridescence,
+     * transmission) have nothing to reflect: `scene.environment` is unset — the
+     * scene carries four lights and no IBL — so a low-roughness surface facing
+     * away from every light renders black, which is exactly what the canopy did.
+     */
+    const env = envTexture();
     const geometries = kartGeometries();
     this.body = this.createBody(geometries.body);
     this.group.add(this.body);
 
     const wheelMaterials: WheelMaterials = {
       tire: this.track(
-        new THREE.MeshStandardMaterial({ color: '#0b0d12', roughness: 0.92, metalness: 0.08 }),
+        new THREE.MeshStandardMaterial({
+          color: '#0b0d12',
+          roughness: 0.92,
+          metalness: 0.08,
+          envMap: env,
+          envMapIntensity: 0.3,
+        }),
       ),
       barrel: this.track(
-        new THREE.MeshStandardMaterial({ color: '#1a2029', roughness: 0.45, metalness: 0.65 }),
+        new THREE.MeshStandardMaterial({
+          color: '#1a2029',
+          roughness: 0.45,
+          metalness: 0.65,
+          envMap: env,
+          envMapIntensity: 0.7,
+        }),
       ),
       rim: this.track(
-        new THREE.MeshStandardMaterial({ color: '#c8d4e8', roughness: 0.22, metalness: 0.88 }),
+        new THREE.MeshStandardMaterial({
+          color: '#c8d4e8',
+          roughness: 0.22,
+          metalness: 0.88,
+          envMap: env,
+          envMapIntensity: 1.2,
+        }),
       ),
       hub: this.track(
         new THREE.MeshStandardMaterial({
@@ -790,6 +962,10 @@ export class Kart {
       repeat: [1, 1],
     });
 
+    // envMap on every material that can show a reflection. Intensities are
+    // per-material: the paint's clearcoat wants a restrained sheen, the
+    // canopy and the chrome rim want to actually look like glass and metal.
+    const env = envTexture();
     const paint = this.track(
       new THREE.MeshPhysicalMaterial({
         color: this.config.color,
@@ -798,6 +974,8 @@ export class Kart {
         metalness: 0.55,
         clearcoat: 1,
         clearcoatRoughness: 0.1,
+        envMap: env,
+        envMapIntensity: 0.75,
       }),
     );
     const accentMat = this.track(
@@ -807,10 +985,18 @@ export class Kart {
         emissiveIntensity: 0.22,
         roughness: 0.3,
         metalness: 0.55,
+        envMap: env,
+        envMapIntensity: 0.6,
       }),
     );
     const darkMat = this.track(
-      new THREE.MeshStandardMaterial({ color: '#0a0e16', roughness: 0.22, metalness: 0.75 }),
+      new THREE.MeshStandardMaterial({
+        color: '#0a0e16',
+        roughness: 0.22,
+        metalness: 0.75,
+        envMap: env,
+        envMapIntensity: 0.7,
+      }),
     );
     const carbon = this.track(
       new THREE.MeshStandardMaterial({
@@ -820,6 +1006,8 @@ export class Kart {
         map: loadGameTexture(this.config.livery ?? '/assets/kart-livery.webp', {
           repeat: [0.5, 0.5],
         }),
+        envMap: env,
+        envMapIntensity: 0.55,
       }),
     );
     const glassMat = this.track(
@@ -831,15 +1019,27 @@ export class Kart {
         // pass tried to refract the same pixels. A dark tint with transmission
         // near 1 and `transparent: false` lets the refraction do all the work,
         // so the canopy darkens its contents instead of washing them out.
-        color: '#16303f',
-        roughness: 0.06,
+        color: '#1e4257',
+        roughness: 0.12,
         metalness: 0,
-        transmission: 0.92,
+        transmission: 0.9,
         transparent: false,
-        thickness: 0.35,
+        thickness: 0.25,
         ior: 1.45,
-        attenuationColor: '#1d4a63',
-        attenuationDistance: 1.4,
+        attenuationColor: '#2a5f7d',
+        attenuationDistance: 2.5,
+        // Thin-film sheen. At roughness 0.06 the canopy was a mirror, and a
+        // mirror in a dark scene reflects dark — it read as a hole. A little
+        // roughness spreads whatever highlights there are, and iridescence
+        // gives the surface an oil-slick tint that shifts with the viewing
+        // angle, which is exactly the read a neon-night canopy wants.
+        iridescence: 0.65,
+        iridescenceIOR: 1.5,
+        iridescenceThicknessRange: [120, 420],
+        // 1.4, the highest of any material on the kart: the canopy is the one
+        // surface whose whole job is to show what is around it.
+        envMap: env,
+        envMapIntensity: 1.4,
       }),
     );
     const stripMat = this.track(
