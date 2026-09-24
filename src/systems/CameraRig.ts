@@ -1,22 +1,27 @@
 import * as THREE from 'three';
 
+/**
+ * Chase camera.
+ *
+ * There is deliberately no screen shake here any more. A trauma/shake channel
+ * used to be fed on every wall scrape (once per frame, so it saturated to full
+ * amplitude while you slid along a barrier), on off-road rumble, on nitro and
+ * on item hits — the whole picture swung around and it read as motion sickness
+ * rather than as impact. Impact is now carried by things that do not move the
+ * camera: wheel spin, scrape sparks, the shockwave decals, the HUD flash and
+ * audio. Do not reintroduce a camera-position or camera-roll wobble.
+ */
 export class CameraRig {
   private readonly desiredPosition = new THREE.Vector3();
   private readonly lookTarget = new THREE.Vector3();
   private readonly forward = new THREE.Vector3();
   private readonly smoothForward = new THREE.Vector3(0, 0, 1);
-  private trauma = 0;
-  private shakeTime = 0;
 
   constructor(
     private readonly camera: THREE.PerspectiveCamera,
     private readonly distance = 7.2,
     private readonly height = 2.35,
   ) {}
-
-  addTrauma(amount: number): void {
-    this.trauma = Math.min(1, this.trauma + amount);
-  }
 
   snapTo(position: THREE.Vector3, heading: number, speed: number): void {
     this.forward.set(Math.sin(heading), 0, Math.cos(heading));
@@ -27,7 +32,6 @@ export class CameraRig {
     this.lookTarget.copy(position).addScaledVector(this.forward, 4.5 + speed * 0.05);
     this.lookTarget.y += 0.9;
     this.camera.lookAt(this.lookTarget);
-    this.trauma = 0;
   }
 
   update(delta: number, position: THREE.Vector3, heading: number, speed: number, boosting: boolean): void {
@@ -52,18 +56,5 @@ export class CameraRig {
     const targetFov = 58 + THREE.MathUtils.clamp((speed - 8) * 0.22, 0, 12) + (boosting ? 6 : 0);
     this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 5, delta);
     this.camera.updateProjectionMatrix();
-
-    this.shake(delta);
-  }
-
-  private shake(delta: number): void {
-    this.shakeTime += delta;
-    this.trauma = Math.max(0, this.trauma - delta * 1.6);
-    if (this.trauma <= 0.001) return;
-    const shake = this.trauma * this.trauma;
-    const t = this.shakeTime * 28;
-    this.camera.position.x += Math.sin(t * 1.13) * 0.28 * shake;
-    this.camera.position.y += Math.cos(t * 1.71) * 0.2 * shake;
-    this.camera.rotation.z += Math.sin(t * 0.97) * 0.025 * shake;
   }
 }

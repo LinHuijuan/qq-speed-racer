@@ -3,8 +3,12 @@
  *
  * The stylesheet honoured the media query, but the 3D scene did not: the
  * `reducedMotion` flag could only be set through the test hook and was never
- * read from matchMedia, so particles, camera shake and the full-screen boost
- * flash kept firing for users who had asked the OS for less motion.
+ * read from matchMedia, so particles and the full-screen boost flash kept
+ * firing for users who had asked the OS for less motion.
+ *
+ * (Camera shake used to be on that list too; it has since been removed from
+ * `CameraRig` altogether — see `camera-shake-check.mjs`. This script still
+ * guards the flag and the particle path, which are the two things left.)
  *
  * Observable contract: with the preference on, the flag reaches the game AND a
  * shockwave that would normally spawn particles spawns none. Without the

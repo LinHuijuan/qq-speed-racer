@@ -93,6 +93,17 @@ const COACH_TIMEOUT_SECONDS = 90;
 const WRONG_WAY_DOT = -0.35;
 const WRONG_WAY_DEBOUNCE = 0.45;
 
+/**
+ * "The car has stopped" — speed under this (m/s, so ~5 km/h) for
+ * `STALL_SECONDS` of race time, while on the track, raises `#stall-hint`.
+ *
+ * The gate is deliberately generous: braking hard for a hairpin dips under it
+ * for a fraction of a second, and a message that flickers on every corner is
+ * noise. Sitting under it for two and a half seconds is not driving.
+ */
+const STALL_SPEED = 1.5;
+const STALL_SECONDS = 2.5;
+
 type RacePhase = 'menu' | 'countdown' | 'racing' | 'finished';
 
 function emptyInput(): RaceInputFrame {
@@ -243,7 +254,6 @@ export class Game {
   private prevProgressP1 = 0;
   private prevProgressP2 = 0;
   private lastRank1 = 1;
-  private offTrackShakeTimer = 0;
   private comboCount = 0;
   private comboTimer = 0;
   private comboLabel = '';
@@ -293,6 +303,7 @@ export class Game {
   private lastDriftDown = false;
   private wrongWayTimer = 0;
   private wrongWayShown = false;
+  private stallTimer = 0;
   /** 0 = not running, 1..COACH_STEPS.length = the step on screen. */
   private coachStep = 0;
   /** Set by the `setCoachStep` test hook so a step can be held for a shot. */
@@ -354,11 +365,9 @@ export class Game {
     this.player1.setBoostFlashHandler(() => {
       this.hud.flashNitro();
       this.audio.whoosh();
-      this.addTrauma(this.cameraRig1, 0.25);
     });
     this.player2.setBoostFlashHandler(() => {
       this.audio.whoosh();
-      this.addTrauma(this.cameraRig2, 0.22);
     });
 
     this.createScene();
@@ -430,6 +439,8 @@ export class Game {
       });
     });
     window.addEventListener('keydown', this.onGlobalKey);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
+    window.addEventListener('blur', this.onWindowBlur);
     this.motionQuery.addEventListener('change', this.onMotionPreferenceChange);
     this.applySettingsUi();
     this.refreshContinueButton();
@@ -607,6 +618,35 @@ export class Game {
       this.togglePause();
     }
   };
+
+  /**
+   * The race stops when the player stops watching it.
+   *
+   * Both of these mean the same thing to the simulation and were both missing:
+   * the kart kept driving while nobody could steer it. Switching tabs left it
+   * coasting into a barrier for as long as the player was away, and a blurred
+   * window is worse — the keydown listener is on `window`, so the throttle and
+   * steering keys are not reaching the game at all while the player presses
+   * them. They come back to a wreck and no explanation.
+   *
+   * Pausing is one-way. Resuming on focus would drop a player who tabbed out
+   * mid-corner straight back into a live car with no countdown, which is the
+   * same surprise in the other direction; the pause panel and its 继续比赛
+   * button are already on screen, so returning is one click and never a jolt.
+   */
+  private readonly onVisibilityChange = () => {
+    if (document.hidden) this.autoPause();
+  };
+
+  private readonly onWindowBlur = () => this.autoPause();
+
+  private autoPause(): void {
+    // `helpOpen` already paused the race, and pausing again would put the pause
+    // panel behind the sheet the player is reading.
+    if (this.paused || this.helpOpen) return;
+    if (this.phase !== 'racing' && this.phase !== 'countdown') return;
+    this.togglePause(true);
+  }
 
   /**
    * The help sheet is a reference, not a mode. Opened from a paused race it
@@ -795,6 +835,8 @@ export class Game {
     this.pipRenderer?.dispose();
     this.renderer.dispose();
     window.removeEventListener('keydown', this.onGlobalKey);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    window.removeEventListener('blur', this.onWindowBlur);
     window.removeEventListener('resize', this.onWindowResize);
     this.motionQuery.removeEventListener('change', this.onMotionPreferenceChange);
     this.resizeObserver?.disconnect();
@@ -874,7 +916,6 @@ export class Game {
     this.player1.setBoostFlashHandler(() => {
       this.hud.flashNitro();
       this.audio.whoosh();
-      this.addTrauma(this.cameraRig1, 0.25);
     });
     if (this.phase === 'menu') {
       this.player1.reset(this.track);
@@ -1094,6 +1135,7 @@ export class Game {
     this.audio.updateEngine(Math.min(1, p1.speed / 55), p1.isBoosting);
     this.updateSpeedLines(p1.speed, p1.isBoosting, p1.isDrifting);
     this.updateOffTrackHelp(delta, p1.offTrack, p1.speed);
+    this.updateStalledHelp(delta, p1.offTrack, p1.speed, raceActive);
     this.updateWrongWay(delta, raceActive);
     this.updateCoach(delta, raceActive);
 
@@ -1103,17 +1145,6 @@ export class Game {
       if (rankNow < this.lastRank1) this.hud.showBanner(`↑ 升至第 ${rankNow}`, 'rank');
       else this.hud.showBanner(`↓ 落至第 ${rankNow}`, 'rank');
       this.lastRank1 = rankNow;
-    }
-
-    // Off-road camera rumble
-    if (p1.offTrack && p1.speed > 4 && this.phase === 'racing') {
-      this.offTrackShakeTimer += delta;
-      if (this.offTrackShakeTimer > 0.15) {
-        this.addTrauma(this.cameraRig1, 0.08);
-        this.offTrackShakeTimer = 0;
-      }
-    } else {
-      this.offTrackShakeTimer = 0;
     }
 
     // Combo window decay
@@ -1150,7 +1181,6 @@ export class Game {
     if (canControl && input.reset) {
       player.resetToTrack(this.track);
       this.audio.whoosh();
-      this.addTrauma(which === 1 ? this.cameraRig1 : this.cameraRig2, 0.3);
       if (!this.reducedMotion) {
         const pos = this.scratchOrigin.copy(player.kart.state.position);
         pos.y = 0.3;
@@ -1179,16 +1209,13 @@ export class Game {
 
     if (!raceActive) return;
 
-    const cam = which === 1 ? this.cameraRig1 : this.cameraRig2;
     if (result.boostPad || result.driftBoost > 0 || result.firedItem === 'turbo') {
       this.audio.whoosh();
-      this.addTrauma(cam, 0.22 + (result.driftBoost ?? 0) * 0.06);
       this.emitBoostShock(player);
       if (which === 1) this.hud.flashNitro();
       this.flashScreen(result.driftBoost > 0 ? 'drift' : 'boost');
     }
     if (result.wallScrape) {
-      this.addTrauma(cam, 0.06);
       if (!this.reducedMotion) {
         const pos = this.scratchOrigin.copy(player.kart.state.position);
         pos.y = 0.2;
@@ -1250,7 +1277,6 @@ export class Game {
     }
     if (this.items.checkMineHit(player.kart.state.position, 1.2)) {
       if (player.applyMineHit()) {
-        this.addTrauma(cam, 0.55);
         this.audio.whoosh();
         this.flashScreen('hit');
         if (!this.reducedMotion) {
@@ -1271,7 +1297,6 @@ export class Game {
     if (!player.kart.state.finished && player.kart.state.lap >= TOTAL_LAPS) {
       player.kart.state.finished = true;
       player.kart.state.finishTime = this.raceTime;
-      this.addTrauma(cam, 0.3);
       this.audio.countdownBeep(true);
     }
   }
@@ -1365,7 +1390,6 @@ export class Game {
     }
     this.audio.whoosh();
     this.audio.countdownBeep(true);
-    this.addTrauma(this.cameraRig1, 0.4);
   }
 
   private fireMissileFrom(shooter: PlayerRacer): void {
@@ -1416,17 +1440,7 @@ export class Game {
       hitAi.kart.state.speed *= 0.4;
       hitAi.kart.state.boostTimer = 0;
     }
-    this.addTrauma(this.cameraRig1, 0.4);
     this.audio.whoosh();
-  }
-
-  /**
-   * Camera shake is one of the things "reduce motion" is meant to switch off,
-   * so every trauma request goes through here rather than straight to the rig.
-   */
-  private addTrauma(rig: CameraRig, amount: number): void {
-    if (this.reducedMotion) return;
-    rig.addTrauma(amount);
   }
 
   /**
@@ -1605,9 +1619,11 @@ export class Game {
     // run would otherwise sit on top of the start panel.
     this.hud.hideAction();
     this.hud.setWrongWay(false);
+    this.hud.setStall(false);
     this.hud.setCoach(null);
     this.wrongWayTimer = 0;
     this.wrongWayShown = false;
+    this.stallTimer = 0;
     this.lastNitroDown = false;
     this.lastDriftDown = false;
     this.coachStep = 0;
@@ -1674,12 +1690,18 @@ export class Game {
     this.currentLapStart = this.raceTime;
     const lapNo = this.player1.kart.state.lap;
     if (lapNo < TOTAL_LAPS) {
-      this.hud.showBanner(`第 ${lapNo + 1} 圈`, 'lap');
+      // The last lap gets named. "第 3 圈" is accurate and tells a first-time
+      // player nothing — they have no idea the race is three laps long, so the
+      // one lap where the remaining distance matters most was the one lap that
+      // did not say it.
+      this.hud.showBanner(
+        lapNo + 1 === TOTAL_LAPS ? '最后一圈 · 冲刺！' : `第 ${lapNo + 1} 圈`,
+        'lap',
+      );
     } else {
       this.hud.showBanner('冲线！', 'lap');
     }
     this.audio.countdownBeep(true);
-    this.addTrauma(this.cameraRig1, 0.2);
   }
 
   private trackProgressForKart(
@@ -1816,7 +1838,6 @@ export class Game {
     if (this.comboCount >= 3) {
       this.hud.showBanner(`${this.comboLabel} ×${this.comboCount} COMBO!`, 'boost');
       this.audio.whoosh();
-      this.addTrauma(this.cameraRig1, 0.15);
     }
   }
 
@@ -1865,6 +1886,28 @@ export class Game {
     this.wrongWayShown = visible;
     this.hud.setWrongWay(visible);
     if (visible) this.audio.countdownBeep(false);
+  }
+
+  /**
+   * "The car has stopped, and here is how to make it go again."
+   *
+   * The third of the three ways a new player ends up motionless, and the only
+   * one that had no answer. `#offtrack-help` covers leaving the road and
+   * `updateWrongWay` covers facing backwards, but the ordinary wall bounce —
+   * the most common of the three — leaves the kart *on* the road and side-on to
+   * it, where neither fires. The throttle does nothing because the kart is
+   * wedged, and nothing on screen says that `R` will put it back on the racing
+   * line from anywhere.
+   *
+   * Suppressed during coaching step 1, which is already saying "hold the
+   * throttle". Two boxes saying the same thing is worse than one.
+   */
+  private updateStalledHelp(delta: number, offTrack: boolean, speed: number, raceActive: boolean): void {
+    const coachingThrottle = this.coachStep === 1;
+    const stalled =
+      raceActive && !offTrack && !coachingThrottle && speed <= STALL_SPEED && !this.player1.kart.state.finished;
+    this.stallTimer = stalled ? this.stallTimer + delta : 0;
+    this.hud.setStall(this.stallTimer > STALL_SECONDS);
   }
 
   /**
@@ -2094,6 +2137,12 @@ export class Game {
         this.resetRace(false);
         this.hud.hideStart();
         this.hud.hideFinish();
+        // `resetRace` deliberately does not touch the pause flag, so a race
+        // forced after an auto-pause (or after a section that paused on purpose)
+        // would sit there frozen: `update` returns early while `paused`, so every
+        // assertion downstream would read the state of a game that is not
+        // running. "Forced into a race" has to mean a running race.
+        this.togglePause(false);
         this.phase = 'racing';
         this.countdownTimer = 0;
         this.lastCountdownLabel = '';
@@ -2359,6 +2408,61 @@ export class Game {
         s.speed = 20;
         this.player1.kart.syncTransform(0);
         return { heading: s.heading };
+      },
+      /**
+       * Stops the kart where it is, so the stall detector can be reached without
+       * first spending a minute wedged against a barrier at 0.2 fps.
+       */
+      stallKart: () => {
+        const s = this.player1.kart.state;
+        s.speed = 0;
+        s.velocity.set(0, 0, 0);
+        s.lateralSpeed = 0;
+        s.isBoosting = false;
+        s.boostTimer = 0;
+        this.player1.kart.syncTransform(0);
+        return { speed: s.speed };
+      },
+      /**
+       * Completes a lap without driving it. The lap callouts — including the one
+       * that names the final lap — sit two and three laps into a race that
+       * cannot be driven headless.
+       */
+      completeLap: () => {
+        const s = this.player1.kart.state;
+        s.lap += 1;
+        s.totalProgress = Math.floor(s.totalProgress) + 1 + s.progress;
+        this.onPlayerLapComplete();
+        this.updateHud();
+        this.publishDiagnostics();
+        return { lap: s.lap };
+      },
+      /**
+       * Runs `frames` fixed 1/60 s steps of the simulation, without waiting for
+       * the renderer.
+       *
+       * Every rule in this file that is expressed in seconds is unreachable at
+       * the speed this environment runs at. `Loop` clamps its delta at 0.05, so
+       * a 2.5 s threshold is 50 rendered frames, and a rendered frame here costs
+       * 0.3–5 s of wall clock — one to four minutes for a rule that fires in two
+       * and a half. That is why the off-track toast's 1.2 s threshold has never
+       * been covered by a test, and it is why the stall hint would not have been
+       * either.
+       *
+       * Only the clock is synthetic: this calls the same `update` the render loop
+       * calls, so the accumulation, the gates and the HUD writes are the real
+       * ones. `elapsed` advances with it because it is the diagnostics clock.
+       *
+       * Capped at 600 frames (10 s) — a hook that can run the loop forever inside
+       * one `evaluate` is a hang waiting to happen.
+       */
+      stepSim: (frames = 1) => {
+        const n = Math.max(0, Math.min(600, Math.floor(frames)));
+        for (let i = 0; i < n; i += 1) {
+          this.elapsed += 1 / 60;
+          this.update(1 / 60, this.elapsed);
+        }
+        return { frames: n };
       },
       /**
        * Finishes with P1 last. `setState('complete')` is built around winning —
