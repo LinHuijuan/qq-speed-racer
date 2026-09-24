@@ -466,56 +466,67 @@ export class Track {
   }
 
   private buildBarriers(): void {
-    // Bright neon guardrails — left cyan, right magenta
-    const cyanRail = new THREE.MeshStandardMaterial({
-      color: '#0a4050',
-      emissive: '#2de2ff',
-      emissiveIntensity: 0.75,
-      roughness: 0.35,
-      metalness: 0.45,
-    });
-    const pinkRail = new THREE.MeshStandardMaterial({
-      color: '#501038',
-      emissive: '#ff3cac',
-      emissiveIntensity: 0.65,
-      roughness: 0.35,
-      metalness: 0.45,
+    // The guardrails used to be two horizontal neon tubes in cyan (left) and
+    // magenta (right) at low height. The road's own edge strips use the same
+    // colours and the same horizontal glowing-line language — from the chase
+    // camera the rail and the kerb line read as one parallel pair, so the
+    // player cannot tell which one is the wall until they have already hit it.
+    //
+    // The wall now reads as a *surface* in a horizontal neutral surface
+    // language: a yellow/black hazard kickplate (the universal "obstacle"
+    // pattern) sitting just outside the red/white kerbs. The cyan/magenta
+    // cues are demoted to small low-intensity post accents so the navigation
+    // cue survives but the wall itself does not look like a road marking.
+    //
+    // Yellow #f0b020 → Rec.601 luminance ≈ 0.700, just under the bloom
+    // threshold (0.72) so the stripes stay crisp instead of bleeding into a
+    // soft halo. Black is well clear of any threshold.
+    const hazardMap = this.createHazardTexture();
+    const kickplateMat = new THREE.MeshStandardMaterial({
+      map: hazardMap,
+      roughness: 0.55,
+      metalness: 0.05,
+      side: THREE.DoubleSide,
     });
     const cyanPost = new THREE.MeshStandardMaterial({
-      color: '#1a3040',
+      color: '#103040',
       emissive: '#2de2ff',
-      emissiveIntensity: 0.4,
+      emissiveIntensity: 0.18,
       roughness: 0.4,
       metalness: 0.5,
     });
     const pinkPost = new THREE.MeshStandardMaterial({
-      color: '#401830',
+      color: '#401030',
       emissive: '#ff3cac',
-      emissiveIntensity: 0.35,
+      emissiveIntensity: 0.16,
       roughness: 0.4,
       metalness: 0.5,
     });
     const capCyan = new THREE.MeshBasicMaterial({ color: '#9ef6ff' });
     const capPink = new THREE.MeshBasicMaterial({ color: '#ff9ad5' });
 
-    // Two horizontal neon tubes + posts on each side
-    const tubeGeo = new THREE.CylinderGeometry(0.09, 0.09, 4.0, 8);
+    // Kickplate: x = thin (16cm), y = 60cm tall, z = 4m segment.
+    // After `dummy.lookAt(next)` the local +Z points along the track tangent,
+    // so scaling Z stretches the plate to fit each segment's chord length and
+    // the long side faces (perpendicular to local X) point inward toward the
+    // road and outward toward the scenery.
+    const kickGeo = new THREE.BoxGeometry(0.16, 0.6, 4.0);
     const postGeo = new THREE.BoxGeometry(0.22, 1.3, 0.22);
     const capGeo = new THREE.BoxGeometry(0.32, 0.12, 0.32);
 
     const sideCount = Math.floor(SAMPLE_COUNT / 8);
-    const cyanTubes = new THREE.InstancedMesh(tubeGeo, cyanRail, sideCount * 2);
-    const pinkTubes = new THREE.InstancedMesh(tubeGeo, pinkRail, sideCount * 2);
-    const cyanPosts = new THREE.InstancedMesh(postGeo, cyanPost, sideCount);
-    const pinkPosts = new THREE.InstancedMesh(postGeo, pinkPost, sideCount);
-    const cyanCaps = new THREE.InstancedMesh(capGeo, capCyan, sideCount);
-    const pinkCaps = new THREE.InstancedMesh(capGeo, capPink, sideCount);
+    const leftKick = new THREE.InstancedMesh(kickGeo, kickplateMat, sideCount);
+    const rightKick = new THREE.InstancedMesh(kickGeo, kickplateMat, sideCount);
+    const leftPosts = new THREE.InstancedMesh(postGeo, cyanPost, sideCount);
+    const rightPosts = new THREE.InstancedMesh(postGeo, pinkPost, sideCount);
+    const leftCaps = new THREE.InstancedMesh(capGeo, capCyan, sideCount);
+    const rightCaps = new THREE.InstancedMesh(capGeo, capPink, sideCount);
 
     const dummy = new THREE.Object3D();
-    let ci = 0;
-    let pi = 0;
-    let cpi = 0;
-    let ppi = 0;
+    let lk = 0;
+    let rk = 0;
+    let lp = 0;
+    let rp = 0;
 
     for (let i = 0; i < sideCount; i += 1) {
       const sampleIndex = Math.floor((i / sideCount) * SAMPLE_COUNT);
@@ -533,64 +544,74 @@ export class Track {
         const midX = (x + nx) / 2;
         const midZ = (z + nz) / 2;
         const len = Math.max(1, Math.hypot(nx - x, nz - z) * 1.05);
-        const tubes = sign < 0 ? cyanTubes : pinkTubes;
-        const tubeIdx = sign < 0 ? ci : pi;
 
-        // Lower tube
-        dummy.position.set(midX, 0.45, midZ);
-        dummy.lookAt(nx, 0.45, nz);
-        dummy.rotateX(Math.PI / 2);
-        dummy.scale.set(1, len / 4.0, 1);
+        // Hazard kickplate. y = 0.3 puts the bottom right at the ground
+        // (above the kerbs which are y = 0.06).
+        dummy.position.set(midX, 0.3, midZ);
+        dummy.lookAt(nx, 0.3, nz);
+        dummy.scale.set(1, 1, len / 4.0);
         dummy.updateMatrix();
-        tubes.setMatrixAt(tubeIdx * 2, dummy.matrix);
+        if (sign < 0) leftKick.setMatrixAt(lk++, dummy.matrix);
+        else rightKick.setMatrixAt(rk++, dummy.matrix);
 
-        // Upper tube
-        dummy.position.set(midX, 0.95, midZ);
-        dummy.lookAt(nx, 0.95, nz);
-        dummy.rotateX(Math.PI / 2);
-        dummy.scale.set(1, len / 4.0, 1);
+        // Post + cap at the segment's start
+        dummy.position.set(x, 0.65, z);
+        dummy.scale.set(1, 1, 1);
+        dummy.rotation.set(0, 0, 0);
         dummy.updateMatrix();
-        tubes.setMatrixAt(tubeIdx * 2 + 1, dummy.matrix);
-
-        if (sign < 0) ci += 1;
-        else pi += 1;
-
-        // Post + cap every segment
-        if (sign < 0 && cpi < sideCount) {
-          dummy.position.set(x, 0.65, z);
-          dummy.scale.set(1, 1, 1);
-          dummy.rotation.set(0, 0, 0);
-          dummy.updateMatrix();
-          cyanPosts.setMatrixAt(cpi, dummy.matrix);
+        if (sign < 0 && lp < sideCount) {
+          leftPosts.setMatrixAt(lp, dummy.matrix);
           dummy.position.y = 1.32;
           dummy.updateMatrix();
-          cyanCaps.setMatrixAt(cpi, dummy.matrix);
-          cpi += 1;
-        } else if (sign > 0 && ppi < sideCount) {
-          dummy.position.set(x, 0.65, z);
-          dummy.scale.set(1, 1, 1);
-          dummy.rotation.set(0, 0, 0);
-          dummy.updateMatrix();
-          pinkPosts.setMatrixAt(ppi, dummy.matrix);
+          leftCaps.setMatrixAt(lp++, dummy.matrix);
+        } else if (sign > 0 && rp < sideCount) {
+          rightPosts.setMatrixAt(rp, dummy.matrix);
           dummy.position.y = 1.32;
           dummy.updateMatrix();
-          pinkCaps.setMatrixAt(ppi, dummy.matrix);
-          ppi += 1;
+          rightCaps.setMatrixAt(rp++, dummy.matrix);
         }
       }
     }
-
-    cyanTubes.count = ci * 2;
-    pinkTubes.count = pi * 2;
-    cyanPosts.count = cpi;
-    pinkPosts.count = ppi;
-    cyanCaps.count = cpi;
-    pinkCaps.count = ppi;
-    for (const m of [cyanTubes, pinkTubes, cyanPosts, pinkPosts, cyanCaps, pinkCaps]) {
+    leftKick.count = lk;
+    rightKick.count = rk;
+    leftPosts.count = lp;
+    rightPosts.count = rp;
+    leftCaps.count = lp;
+    rightCaps.count = rp;
+    for (const m of [leftKick, rightKick, leftPosts, rightPosts, leftCaps, rightCaps]) {
       m.instanceMatrix.needsUpdate = true;
       m.castShadow = true;
       this.group.add(m);
     }
+  }
+
+  /**
+   * Yellow/black diagonal-stripe pattern used as the wall's `map`. Drawn as a
+   * canvas so the build has no asset dependency. Keep the stripe colour just
+   * under the bloom threshold so the pattern does not smear into a halo at
+   * chase distance.
+   */
+  private createHazardTexture(): THREE.CanvasTexture {
+    const width = 256;
+    const height = 32;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Could not create hazard texture context.');
+    ctx.fillStyle = '#f0b020';
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = '#1a1a1a';
+    const stripeWidth = 32;
+    for (let i = 0; i < width; i += stripeWidth * 2) {
+      ctx.fillRect(i, 0, stripeWidth, height);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.repeat.set(2, 1);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
   }
 
   private buildRunoff(): void {

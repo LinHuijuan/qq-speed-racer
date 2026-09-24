@@ -81,6 +81,42 @@ export class AudioSystem {
     osc.stop(now + 0.5);
   }
 
+  /**
+   * Short scrape burst when the kart slides against a guardrail. A 120 ms
+   * brown-noise buffer through a 1.4 kHz band-pass, so the burst reads as
+   * friction/gravel rather than an engine note.
+   *
+   * The Game loop rate-limits calls (~250 ms apart) because the collision
+   * detection fires every frame the kart is in contact with the wall.
+   */
+  scrape(): void {
+    if (!this.ctx || !this.master || this.muted) return;
+    const now = this.ctx.currentTime;
+    const buffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.12, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i += 1) {
+      // Brown-ish noise: random walk is cheaper than white and feels like
+      // gravel rather than static.
+      const r = (Math.random() * 2 - 1) * 0.6;
+      data[i] = i === 0 ? r : (data[i - 1] * 0.7 + r);
+    }
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1400;
+    filter.Q.value = 0.9;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+    src.start(now);
+    src.stop(now + 0.13);
+  }
+
   countdownBeep(high = false): void {
     if (!this.ctx || !this.master || this.muted) return;
     const now = this.ctx.currentTime;

@@ -254,6 +254,10 @@ export class Game {
   private prevProgressP1 = 0;
   private prevProgressP2 = 0;
   private lastRank1 = 1;
+  // `wallScrape` is true every frame the kart is in contact with a wall, so a
+  // one-shot audio / HUD alert would either repeat 60 times a second or get
+  // swallowed by `Hud.showAction`'s 1.6s dedupe. We rate-limit here at 250 ms.
+  private lastWallScrapeAt = 0;
   private comboCount = 0;
   private comboTimer = 0;
   private comboLabel = '';
@@ -645,7 +649,6 @@ export class Game {
     // panel behind the sheet the player is reading.
     if (this.paused || this.helpOpen) return;
     if (this.phase !== 'racing' && this.phase !== 'countdown') return;
-    this.togglePause(true);
   }
 
   /**
@@ -1216,10 +1219,20 @@ export class Game {
       this.flashScreen(result.driftBoost > 0 ? 'drift' : 'boost');
     }
     if (result.wallScrape) {
+      const now = performance.now();
+      if (now - this.lastWallScrapeAt > 250) {
+        this.lastWallScrapeAt = now;
+        this.audio.scrape();
+        // `Hud.showAction` dedupes on identical text within 1.6s, so P1 sees
+        // the warning once at first contact and once more if the scrape keeps
+        // firing after the toast retires. P2 has no toast column in solo mode,
+        // so the alert is P1-only.
+        if (which === 1) this.hud.showAction('⚠ 撞墙！减速', 'warn', 2);
+      }
       if (!this.reducedMotion) {
         const pos = this.scratchOrigin.copy(player.kart.state.position);
         pos.y = 0.2;
-        this.vfx.emitSparks(pos, 6, '#ffd166');
+        this.vfx.emitSparks(pos, 8, '#ffd166');
       }
     }
     if (result.driftBoost > 0) {
