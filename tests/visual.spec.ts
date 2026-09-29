@@ -63,9 +63,12 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
     window.__THREE_GAME_TEST_HOOKS__?.setPausedForScreenshot(false);
   });
 
-  const sample = await sampleCanvas(page);
-  expect(sample, JSON.stringify(sample)).toMatchObject({ ok: true });
-
+  // Read the baseline immediately after parking, before any canvas sampling:
+  // the kart keeps simulating from the moment the state is parked, and the
+  // screenshot roundtrip costs 1-2s of blind no-steer driving. Sampling first
+  // made `before.speed` a post-corner value, so the throttle assertion below
+  // compared two decelerating points and flaked on whichever run's sampling
+  // happened to be slow.
   const before = await page.evaluate(() => {
     const p = window.__THREE_GAME_DIAGNOSTICS__?.player;
     return {
@@ -107,6 +110,10 @@ test('renders a nonblank interactive game canvas', async ({ page }, testInfo) =>
   const moved = Math.hypot(after.x - before.x, after.z - before.z);
   expect(moved, JSON.stringify({ before, after })).toBeGreaterThan(0.5);
   expect(after.speed).toBeGreaterThan(before.speed);
+
+  // Canvas still renders real pixels after the drive.
+  const sample = await sampleCanvas(page);
+  expect(sample, JSON.stringify(sample)).toMatchObject({ ok: true });
 
   const screenshot = await page.screenshot({ fullPage: true });
   await testInfo.attach(`${testInfo.project.name}-game`, {

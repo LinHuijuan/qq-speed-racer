@@ -222,6 +222,8 @@ export class Hud {
     duoSummary?: string;
     /** Replaces the record line when there is a suggestion worth more than it. */
     tip?: string;
+    /** Solo champion line names the actual circuit, not a hardcoded one. */
+    trackName?: string;
   }): void {
     this.overlayStart.classList.remove('visible');
     this.overlayStart.style.display = 'none';
@@ -231,7 +233,9 @@ export class Hud {
     this.el('#finish-title').textContent = summary.title;
     this.el('#finish-summary').textContent =
       summary.duoSummary ??
-      (summary.rank === 1 ? '冠军冲线！霓虹赛道被你点亮。' : `最终名次 ${summary.rank}/${summary.total}`);
+      (summary.rank === 1
+        ? `冠军冲线！${summary.trackName ?? '赛道'}被你点亮。`
+        : `最终名次 ${summary.rank}/${summary.total}`);
     this.el('#finish-time').textContent = formatTime(summary.time);
     this.el('#finish-rank').textContent = `${summary.rank} / ${summary.total}`;
     this.el('#finish-lap').textContent = summary.bestLap == null ? '--:--.--' : formatTime(summary.bestLap);

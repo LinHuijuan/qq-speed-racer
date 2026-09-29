@@ -50,11 +50,18 @@ export class AIRacer {
   reset(track: Track, gridIndex: number): void {
     const startT = (0.002 * (gridIndex % 2) + 0) % 1;
     const sample = track.sampleAt(startT);
-    const stagger = 0.9 + Math.floor(gridIndex / 2) * 2.4;
+    /*
+     * Rows AHEAD of the line, not behind it. The old -stagger put the back row
+     * 2.3-3.3m behind the player — directly in front of the chase camera, which
+     * parks 7.2m further back — so the opening shot had a rival kart's glowing
+     * rear filling the bottom of the frame as a white blob. A 3.2/6.8m two-row
+     * grid reads as a starting formation and keeps every kart in clear view.
+     */
+    const stagger = 3.2 + Math.floor(gridIndex / 2) * 3.6;
     const position = sample.position
       .clone()
       .addScaledVector(sample.left, this.profile.laneOffset)
-      .addScaledVector(sample.tangent, -stagger);
+      .addScaledVector(sample.tangent, stagger);
     const heading = Math.atan2(sample.tangent.x, sample.tangent.z);
     this.kart.reset(position, heading);
     this.targetProgress = startT;

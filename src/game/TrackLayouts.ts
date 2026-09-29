@@ -23,7 +23,24 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
     boostTs: [0.08, 0.22, 0.41, 0.58, 0.77],
     accentA: '#2de2ff',
     accentB: '#ff3cac',
+    /*
+     * The start line is points[0], and the chase camera parks 7.2m behind it.
+     * This array starts at the top straight rather than the original
+     * [0,0,0] corner: the old start had the return leg ([-10,12]→[-8,-8]) and
+     * the pit row passing directly under that camera pose, so the opening shot
+     * was a guardrail crossing the frame with a road slab where the sky should
+     * be. Same loop, same direction — only the start line moved to the one
+     * straight with clear air behind it.
+     */
     points: [
+      [-28, 0, 104],
+      [-2, 0, 92],
+      [8, 0, 62],
+      [4, 0, 34],
+      [-10, 0, 12],
+      [-8, 0, -8],
+      [8, 0, -18],
+      [28, 0, -12],
       [0, 0, 0],
       [36, 0, 4],
       [64, 0, 18],
@@ -38,14 +55,6 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
       [-82, 0, 46],
       [-86, 0, 78],
       [-62, 0, 98],
-      [-28, 0, 104],
-      [-2, 0, 92],
-      [8, 0, 62],
-      [4, 0, 34],
-      [-10, 0, 12],
-      [-8, 0, -8],
-      [8, 0, -18],
-      [28, 0, -12],
     ],
   },
   {
@@ -77,15 +86,21 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
       [62, 0, 50],
       [36, 0, 68],
       [8, 0, 62],
-      [-10, 0, 40],
-      [-6, 0, 12],
-      [-20, 0, -12],
+      /*
+       * The two return legs behind the start straight used to pass 4-6m from
+       * the chase camera's pose (the camera parks 7.2m behind points[0], on
+       * top of the [-6,12]→[-20,-12] and [-16,8]→[-8,-16] roads), which filled
+       * the opening shot with guardrails. Pushed outward so the grid camera
+       * has clear air; the folded-figure shape is unchanged.
+       */
+      [-10, 0, 16],
+      [-28, 0, -18],
       [-40, 0, 0],
       [-36, 0, 28],
       [-18, 0, 40],
       [-2, 0, 28],
-      [-16, 0, 8],
-      [-8, 0, -16],
+      [-24, 0, 12],
+      [-16, 0, -24],
       [12, 0, -20],
     ],
   },
@@ -134,22 +149,13 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
     boostTs: [0.12, 0.3, 0.48, 0.66, 0.82],
     accentA: '#7ef29a',
     accentB: '#9b6bff',
+    /*
+     * Start line moved to the [-70,5] straight (same loop, rotated): the old
+     * [0,0,0] start had the [-25,5]→[-8,-5] return leg passing ~4m from the
+     * chase camera pose, putting a road surface and its rails straight through
+     * the opening shot.
+     */
     points: [
-      [0, 0, 0],
-      [30, 0, 10],
-      [50, 0, 35],
-      [45, 0, 65],
-      [20, 0, 85],
-      [-10, 0, 90],
-      [-35, 0, 75],
-      [-45, 0, 48],
-      [-30, 0, 25],
-      [-5, 0, 20],
-      [10, 0, 40],
-      [5, 0, 65],
-      [-20, 0, 72],
-      [-45, 0, 60],
-      [-65, 0, 35],
       [-70, 0, 5],
       [-50, 0, -15],
       [-20, 0, -22],
@@ -171,6 +177,21 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
       [-8, 0, -5],
       [8, 0, -15],
       [22, 0, 0],
+      [0, 0, 0],
+      [30, 0, 10],
+      [50, 0, 35],
+      [45, 0, 65],
+      [20, 0, 85],
+      [-10, 0, 90],
+      [-35, 0, 75],
+      [-45, 0, 48],
+      [-30, 0, 25],
+      [-5, 0, 20],
+      [10, 0, 40],
+      [5, 0, 65],
+      [-20, 0, 72],
+      [-45, 0, 60],
+      [-65, 0, 35],
     ],
   },
 ];

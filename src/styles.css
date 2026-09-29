@@ -990,13 +990,22 @@ kbd {
   backdrop-filter: blur(12px) saturate(1.1);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.28s ease;
+  /* `visibility` is what actually removes the panel from the accessibility
+     tree — opacity alone left every hidden overlay (pause, finish, help) fully
+     readable to assistive tech, and tab order could land focus inside a panel
+     the player cannot see. The delayed flip keeps the 0.28s fade-out working. */
+  visibility: hidden;
+  transition:
+    opacity 0.28s ease,
+    visibility 0s linear 0.28s;
   z-index: 8;
 }
 
 .overlay.visible {
   opacity: 1;
   pointer-events: auto;
+  visibility: visible;
+  transition: opacity 0.28s ease;
 }
 
 /*
@@ -1267,22 +1276,51 @@ kbd {
   font-size: 0.9rem;
 }
 
+/*
+ * Settings pills.
+ *
+ * Both used flat translucent fills, which put the only two interactive
+ * controls in the settings block visually below the mode pills and the track
+ * cards sitting right above them. Same two-layer recipe as `.mode-btn`: an
+ * opaque surface under a gradient ring, with the "on" states carrying the cyan
+ * and the "off" states dropping to a hairline and muted ink.
+ */
 .toggle-btn {
   min-width: 64px;
   min-height: 36px;
-  border: 1px solid var(--border);
-  background: rgba(45, 226, 255, 0.15);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background-image:
+    linear-gradient(160deg, rgba(18, 26, 48, 0.9), rgba(8, 12, 26, 0.85)),
+    linear-gradient(160deg, rgba(45, 226, 255, 0.75), rgba(238, 244, 255, 0.16));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   color: var(--ink);
   font-weight: 700;
   /* Used to be inherited from `.panel button`. */
   font-size: 0.9rem;
-  border-radius: 999px;
   cursor: pointer;
+  box-shadow:
+    var(--hairline-soft),
+    0 0 16px -8px rgba(45, 226, 255, 1);
+  transition:
+    filter 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+
+.toggle-btn:hover {
+  filter: brightness(1.15);
 }
 
 .toggle-btn.off {
-  background: rgba(255, 255, 255, 0.06);
+  background-image:
+    linear-gradient(160deg, rgba(14, 20, 38, 0.9), rgba(8, 12, 26, 0.85)),
+    linear-gradient(160deg, rgba(238, 244, 255, 0.22), rgba(238, 244, 255, 0.08));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   color: var(--muted);
+  box-shadow: var(--hairline-soft);
 }
 
 .diff-group {
@@ -1294,39 +1332,88 @@ kbd {
   min-width: 56px;
   min-height: 34px;
   padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: transparent;
+  background-image:
+    linear-gradient(160deg, rgba(16, 22, 42, 0.9), rgba(8, 12, 26, 0.85)),
+    linear-gradient(160deg, rgba(238, 244, 255, 0.2), rgba(238, 244, 255, 0.07));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   color: var(--muted);
   cursor: pointer;
   font-size: 0.8rem;
+  box-shadow: var(--hairline-soft);
+  transition:
+    color 0.15s ease,
+    filter 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.diff-btn:hover {
+  color: var(--ink);
+  filter: brightness(1.12);
 }
 
 .diff-btn.active {
-  border-color: var(--cyan);
+  background-image:
+    linear-gradient(160deg, rgba(20, 32, 60, 0.92), rgba(8, 12, 26, 0.88)),
+    linear-gradient(160deg, rgba(45, 226, 255, 0.9), rgba(123, 92, 255, 0.45));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   color: var(--ink);
-  background: rgba(45, 226, 255, 0.18);
+  box-shadow:
+    var(--hairline-soft),
+    0 0 18px -6px rgba(45, 226, 255, 0.95);
 }
 
+/*
+ * Both floating race controls used a flat `background` over a grey hairline,
+ * which read as generic chrome next to every other surface in the game — the
+ * chips, the pads and the pills all use the same two-layer recipe (an opaque
+ * surface under a gradient border ring). These two are the only controls on
+ * screen for the whole race, so they get that recipe too.
+ */
 #pause-fab {
   position: absolute;
   top: max(14px, env(safe-area-inset-top));
   right: max(14px, env(safe-area-inset-right));
   width: 48px;
   height: 48px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  border: 1px solid transparent;
   border-radius: 14px;
-  background: rgba(8, 12, 28, 0.72);
+  background-image:
+    linear-gradient(160deg, rgba(26, 38, 70, 0.93), rgba(9, 13, 28, 0.87)),
+    linear-gradient(
+      160deg,
+      rgba(45, 226, 255, 0.8),
+      rgba(238, 244, 255, 0.14) 52%,
+      rgba(255, 60, 172, 0.55)
+    );
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   color: var(--ink);
   font-weight: 800;
   font-size: 1rem;
   cursor: pointer;
   z-index: 6;
   backdrop-filter: blur(10px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--hairline), var(--shadow);
   transition:
-    border-color 0.15s ease,
-    transform 0.1s ease;
+    filter 0.15s ease,
+    transform 0.1s ease,
+    box-shadow 0.15s ease;
+}
+
+#pause-fab:hover {
+  filter: brightness(1.18);
+  box-shadow:
+    var(--hairline),
+    var(--shadow),
+    0 0 18px -6px rgba(45, 226, 255, 1);
+}
+
+#pause-fab:active {
+  transform: scale(0.94);
 }
 
 #pip-toggle {
@@ -1335,15 +1422,29 @@ kbd {
   right: max(14px, env(safe-area-inset-right));
   width: 48px;
   height: 40px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid transparent;
   border-radius: 12px;
-  background: rgba(8, 12, 28, 0.72);
+  background-image:
+    linear-gradient(160deg, rgba(18, 26, 48, 0.9), rgba(8, 12, 26, 0.85)),
+    linear-gradient(160deg, rgba(45, 226, 255, 0.5), rgba(238, 244, 255, 0.12));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
   color: var(--muted);
   font-weight: 700;
   font-size: 0.72rem;
   cursor: pointer;
   z-index: 9;
   backdrop-filter: blur(10px);
+  box-shadow: var(--hairline-soft);
+  transition:
+    color 0.15s ease,
+    filter 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+#pip-toggle:hover {
+  color: var(--ink);
+  filter: brightness(1.15);
 }
 
 #pip-toggle.hidden-ctl,
@@ -1352,9 +1453,15 @@ kbd {
 }
 
 #pip-toggle.active {
-  border-color: var(--gold);
   color: var(--gold);
-  box-shadow: 0 0 14px rgba(255, 209, 102, 0.25);
+  background-image:
+    linear-gradient(160deg, rgba(38, 30, 12, 0.92), rgba(14, 11, 6, 0.88)),
+    linear-gradient(160deg, rgba(255, 209, 102, 0.9), rgba(255, 150, 70, 0.4));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  box-shadow:
+    var(--hairline-soft),
+    0 0 16px -4px rgba(255, 209, 102, 0.85);
 }
 
 #pip-frame {
@@ -1480,7 +1587,11 @@ kbd {
 }
 
 .countdown.show {
-  animation: count-pop 0.7s ease-out;
+  /* One label holds the screen for ~1.15s; a 0.7s animation spent the last
+     0.45s of every count fully faded out, so the "2" (and the GO!'s tail)
+     kept vanishing early. 1.05s keeps each digit up until the next replaces
+     it, with the pop still reading as a beat. */
+  animation: count-pop 1.05s ease-out;
 }
 
 #touch-controls {
@@ -3082,5 +3193,58 @@ body.duo-mode #touch-controls {
 
   #overlay-help #help-coach-button {
     grid-area: coach;
+  }
+}
+
+/*
+ * Short viewports — a 1280x720 desktop window is the single most common way
+ * this game is opened. At that height the start panel overflowed by ~63px, so
+ * the primary CTA sat on the fold and the panel carried a permanent scrollbar.
+ * These are the safest levers: air between sections, panel padding, and 2vh
+ * more panel height — not type sizes or card layouts, which the phone blocks
+ * below own. Applies to every .panel overlay, which is also what the finish
+ * and pause panels want at this height.
+ */
+@media (max-height: 780px) {
+  .panel {
+    max-height: min(94vh, 780px);
+    padding: 20px 26px 16px;
+  }
+
+  .panel h1,
+  .panel h2 {
+    font-size: clamp(1.7rem, 5vw, 2.2rem);
+  }
+
+  .lead {
+    margin-top: 8px;
+  }
+
+  .eyebrow {
+    margin-bottom: 8px;
+  }
+
+  .mode-select {
+    margin: 12px 0 6px;
+  }
+
+  .track-picker {
+    margin: 8px 0 4px;
+  }
+
+  .car-picker {
+    margin: 6px 0 4px;
+  }
+
+  .settings-block {
+    margin: 10px 0;
+  }
+
+  .controls-list {
+    margin: 10px 0;
+  }
+
+  .hint {
+    margin-top: 8px;
   }
 }

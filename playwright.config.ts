@@ -6,7 +6,11 @@ export default defineConfig({
   // frame-time collapse makes game time drift from wall time, flaking timed
   // gameplay phases and screenshot baselines.
   workers: 1,
-  timeout: 30_000,
+  // WebKit on Windows needs 30-40s for a cold dev-server page load (vite
+  // compiles on first request and the load event waits for every texture), so
+  // 30s made this project flake on the machine it runs on. 60s is still far
+  // below the point where a genuinely broken page would pass.
+  timeout: 60_000,
   expect: {
     timeout: 5_000,
   },

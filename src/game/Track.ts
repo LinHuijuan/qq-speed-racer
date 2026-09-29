@@ -1213,7 +1213,12 @@ export class Track {
     for (let i = 0; i < 28; i += 1) {
       const sample = this.samples[Math.floor((i / 28) * SAMPLE_COUNT)];
       const side = i % 2 === 0 ? -1 : 1;
-      const offset = side * (ROAD_HALF_WIDTH + 3.2);
+      // The start straight keeps its sight lines: a pole at t≈0 stands 7m in
+      // front of the chase camera on the grid and splits the opening frame
+      // top to bottom, so poles in the start window are pushed well out into
+      // the backdrop instead of being dropped (keeps the lamp rhythm intact).
+      const nearStart = (i / 28) < 0.06 || (i / 28) > 0.94;
+      const offset = side * (ROAD_HALF_WIDTH + (nearStart ? 9.5 : 3.2));
       dummy.position.set(
         sample.position.x + sample.left.x * offset,
         3.5,

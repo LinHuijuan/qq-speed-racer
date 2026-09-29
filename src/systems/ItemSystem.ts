@@ -64,7 +64,11 @@ export class ItemSystem {
       map: itemTex,
       emissive: '#9b6bff',
       emissiveMap: itemTex,
-      emissiveIntensity: 0.75,
+      // 0.75 cleared the 0.72 bloom threshold on the texture's brightest pixels
+      // whenever a box came within a few metres of the camera — the opening shot
+      // of every race had one dying into a white blob. 0.58 stays lit without
+      // feeding the bloom pass.
+      emissiveIntensity: 0.58,
       roughness: 0.25,
       metalness: 0.4,
       transparent: true,
@@ -77,7 +81,13 @@ export class ItemSystem {
     this.boxes.length = 0;
     this.mines.length = 0;
 
-    const ts = [0.05, 0.15, 0.28, 0.38, 0.5, 0.62, 0.72, 0.84];
+    // The first box used to sit at t=0.05 — a kart-length or two past the grid.
+    // From the chase camera on the start line it was the closest bright thing in
+    // frame, and its emissive map blew out into a white slab that hid the player's
+    // own kart during the countdown. t=0.09 keeps it an early pickup without
+    // putting it inside the opening shot (or inside reach of a front-row kart
+    // before the lights even change).
+    const ts = [0.09, 0.15, 0.28, 0.38, 0.5, 0.62, 0.72, 0.84];
     for (const t of ts) {
       const sample = track.sampleAt(t);
       const lateral = (this.rng() - 0.5) * 6;

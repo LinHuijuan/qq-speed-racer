@@ -1075,6 +1075,7 @@ export class Game {
         this.phase = 'racing';
         this.hud.showCountdown('GO!');
         this.audio.countdownBeep(true);
+        this.awardLaunchBoost();
       }
     }
 
@@ -1386,6 +1387,7 @@ export class Game {
       trackBest: this.savedBestThisRace,
       newRecord: isNewRecord,
       tip,
+      trackName: this.track.layout.name,
       duoSummary:
         this.mode === 'duo'
           ? `P1 第${rank1}名 · P2 第${rank2}名`
@@ -1650,7 +1652,7 @@ export class Game {
     this.items.build(this.track);
 
     this.player1.reset(this.track);
-    // Stagger P2 slightly beside P1
+    // Stagger P2 slightly ahead-right of P1, matching the AI grid rows
     if (this.mode === 'duo') {
       this.player2.kart.group.visible = true;
       this.player2.reset(this.track);
@@ -1659,7 +1661,7 @@ export class Game {
       this.player2.kart.state.position
         .copy(sample.position)
         .addScaledVector(sample.left, -3.2)
-        .addScaledVector(sample.tangent, -2.4);
+        .addScaledVector(sample.tangent, 2.4);
       this.player2.kart.state.heading = s.heading;
       this.player2.kart.syncTransform(0);
     } else {
@@ -1685,13 +1687,35 @@ export class Game {
     const t = this.countdownTimer;
     let label = '';
     if (t > 2.3) label = '3';
-    else if (t > 1.3) label = '2';
-    else if (t > 0.3) label = '1';
-    else label = 'GO!';
+    else if (t > 1.15) label = '2';
+    // "GO!" is not shown here: it used to appear while 0.3s of countdown was
+    // still left, telling the player to go while the kart was still frozen to
+    // the grid. The racing transition in update() owns the GO! now.
+    else label = '1';
     if (label !== this.lastCountdownLabel) {
       this.lastCountdownLabel = label;
       this.hud.showCountdown(label);
-      this.audio.countdownBeep(label === 'GO!');
+      this.audio.countdownBeep(false);
+    }
+  }
+
+  /**
+   * QQ-Speed-style launch reward: hold the throttle through the countdown and
+   * the kart leaves the line on a small boost. It costs nothing to attempt —
+   * the coach's step 1 is already telling a new player to hold W — and it turns
+   * the three seconds the player can otherwise do nothing about into a decision.
+   */
+  private awardLaunchBoost(): void {
+    if (this.inputP1.throttle > 0) {
+      this.player1.kart.state.boostTimer = Math.max(this.player1.kart.state.boostTimer, 1.0);
+      this.player1.kart.state.isBoosting = true;
+      this.hud.showBanner('完美起步！', 'boost');
+      this.audio.whoosh();
+      this.emitBoostShock(this.player1);
+    }
+    if (this.mode === 'duo' && this.inputP2.throttle > 0) {
+      this.player2.kart.state.boostTimer = Math.max(this.player2.kart.state.boostTimer, 1.0);
+      this.player2.kart.state.isBoosting = true;
     }
   }
 
@@ -2178,28 +2202,35 @@ export class Game {
           this.selectMode(this.mode);
           this.phase = 'racing';
           this.raceTime = 18.5;
-          const sample = this.track.sampleAt(0.32);
+          // t=0.36 is the [0,0]→[36,4]→[64,18] straight — the longest runway on
+          // any of the four layouts, chosen so the visual test's blind no-steer
+          // driving window stays on the road. The old 0.32 was tuned for the
+          // pre-rotation neon parameterization; after the start line moved it
+          // landed on the old start-line hairpin and the parked kart grated the
+          // barrier before the throttle-hold assertion could see speed rise.
+          const parkT = 0.36;
+          const sample = this.track.sampleAt(parkT);
           this.player1.kart.state.lap = 1;
-          this.player1.kart.state.progress = 0.32;
-          this.player1.kart.state.totalProgress = 1.32;
+          this.player1.kart.state.progress = parkT;
+          this.player1.kart.state.totalProgress = 1 + parkT;
           this.player1.kart.state.speed = 42;
           this.player1.kart.state.nitro = 0.72;
           this.player1.kart.state.position.copy(sample.position);
           this.player1.kart.state.heading = Math.atan2(sample.tangent.x, sample.tangent.z);
           this.player1.kart.syncTransform(0);
-          this.prevProgressP1 = 0.32;
+          this.prevProgressP1 = parkT;
           this.lapTimes = [24.2, 23.8];
           this.bestLap = 23.8;
           if (this.mode === 'duo') {
             this.player2.kart.state.lap = 1;
-            this.player2.kart.state.progress = 0.28;
-            this.player2.kart.state.totalProgress = 1.28;
+            this.player2.kart.state.progress = 0.05;
+            this.player2.kart.state.totalProgress = 1.05;
             this.player2.kart.state.speed = 38;
-            const s2 = this.track.sampleAt(0.28);
+            const s2 = this.track.sampleAt(0.05);
             this.player2.kart.state.position.copy(s2.position).addScaledVector(s2.left, -2);
             this.player2.kart.state.heading = Math.atan2(s2.tangent.x, s2.tangent.z);
             this.player2.kart.syncTransform(0);
-            this.prevProgressP2 = 0.28;
+            this.prevProgressP2 = 0.05;
           }
           for (let i = 0; i < this.ais.length; i += 1) {
             if (!this.ais[i].kart.group.visible) continue;
