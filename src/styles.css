@@ -406,6 +406,38 @@ kbd {
   box-shadow: 0 0 18px rgba(45, 226, 255, 0.35);
 }
 
+/*
+ * The status chip is the one line that always knows what is happening, so its
+ * rail doubles as a state light. Colours mirror the rest of the HUD: boost is
+ * the arc's cyan, drift the pips' magenta, off-track the alert gold, the
+ * countdown violet, a duo lead gold. The rail plus a soft wash is enough —
+ * the text itself stays ink so legibility never trades against the theming.
+ */
+#status-line[data-state='boost'] {
+  border-left-color: var(--cyan);
+  box-shadow: 0 0 16px -4px rgba(45, 226, 255, 0.9);
+}
+
+#status-line[data-state='drift'] {
+  border-left-color: var(--magenta);
+  box-shadow: 0 0 16px -4px rgba(255, 60, 172, 0.9);
+}
+
+#status-line[data-state='offtrack'] {
+  border-left-color: var(--gold);
+  box-shadow: 0 0 16px -4px rgba(255, 209, 102, 0.9);
+}
+
+#status-line[data-state='count'] {
+  border-left-color: #9b6bff;
+  box-shadow: 0 0 16px -4px rgba(155, 107, 255, 0.9);
+}
+
+#status-line[data-state='lead'] {
+  border-left-color: var(--gold);
+  box-shadow: 0 0 16px -4px rgba(255, 209, 102, 0.9);
+}
+
 #center-banner {
   position: absolute;
   top: 42%;
@@ -702,6 +734,29 @@ kbd {
   text-align: center;
   text-shadow: 0 0 10px rgba(255, 60, 172, 0.6);
   box-shadow: var(--hairline-soft);
+  transition:
+    background-image 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+/* Boost state: the "B" lights gold to match the hot arc around the speedo. */
+.gear-tag.boosting {
+  background-image:
+    linear-gradient(160deg, rgba(52, 40, 10, 0.92), rgba(22, 16, 6, 0.88)),
+    linear-gradient(
+      160deg,
+      rgba(255, 209, 102, 0.95),
+      rgba(255, 150, 70, 0.5) 55%,
+      rgba(255, 60, 172, 0.6)
+    );
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  color: #fff1c4;
+  text-shadow: 0 0 12px rgba(255, 209, 102, 0.85);
+  box-shadow:
+    var(--hairline-soft),
+    0 0 18px -4px rgba(255, 209, 102, 0.95);
 }
 
 .nitro-cluster {
@@ -1571,6 +1626,21 @@ kbd {
   text-shadow: 0 0 16px rgba(255, 209, 102, 0.6);
 }
 
+/*
+ * Podium tints on the rank stat. 1st keeps the gold from the rule above;
+ * silver and bronze recolour the same cell so podium order reads at a glance.
+ * The ID selector beats the (0,2,2) nth-child rule without touching it.
+ */
+#finish-rank.rank-2 {
+  color: #c9d4ea;
+  text-shadow: 0 0 16px rgba(201, 212, 234, 0.55);
+}
+
+#finish-rank.rank-3 {
+  color: #eda66b;
+  text-shadow: 0 0 16px rgba(237, 166, 107, 0.55);
+}
+
 .countdown {
   position: absolute;
   inset: 0;
@@ -1592,6 +1662,92 @@ kbd {
      kept vanishing early. 1.05s keeps each digit up until the next replaces
      it, with the pop still reading as a beat. */
   animation: count-pop 1.05s ease-out;
+}
+
+/*
+ * The countdown reads as a rising sequence, not four identical flashes:
+ * 3 cyan → 2 violet → 1 magenta → GO gold. The digit classes only recolour;
+ * the pop timing stays shared so every beat lands on the same rhythm.
+ */
+.countdown[data-digit='3'] {
+  color: #9ef6ff;
+  text-shadow:
+    0 0 24px rgba(45, 226, 255, 0.8),
+    0 0 56px rgba(45, 226, 255, 0.45);
+}
+
+.countdown[data-digit='2'] {
+  color: #c9b6ff;
+  text-shadow:
+    0 0 24px rgba(155, 107, 255, 0.8),
+    0 0 56px rgba(155, 107, 255, 0.45);
+}
+
+.countdown[data-digit='1'] {
+  color: #ff9ad5;
+  text-shadow:
+    0 0 24px rgba(255, 60, 172, 0.8),
+    0 0 56px rgba(255, 60, 172, 0.45);
+}
+
+.countdown[data-digit='go'] {
+  background: linear-gradient(90deg, var(--gold), #fff 45%, var(--cyan));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 22px rgba(255, 209, 102, 0.55));
+  font-size: clamp(4.5rem, 19vw, 8.5rem);
+}
+
+/*
+ * One shock ring behind the digit, expanding with the pop and dying with it.
+ * Painted by ::before so the markup stays a single element; opacity-only fade
+ * keeps it compositor-cheap alongside the digit's own transform pop.
+ */
+.countdown::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 240px;
+  height: 240px;
+  margin: -120px 0 0 -120px;
+  border: 2px solid rgba(45, 226, 255, 0.5);
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.countdown.show::before {
+  animation: count-ring 1.05s ease-out;
+}
+
+.countdown[data-digit='2']::before {
+  border-color: rgba(155, 107, 255, 0.5);
+}
+
+.countdown[data-digit='1']::before {
+  border-color: rgba(255, 60, 172, 0.5);
+}
+
+.countdown[data-digit='go']::before {
+  border-color: rgba(255, 209, 102, 0.55);
+}
+
+@keyframes count-ring {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.55);
+  }
+  70% {
+    opacity: 0.55;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.35);
+  }
 }
 
 #touch-controls {

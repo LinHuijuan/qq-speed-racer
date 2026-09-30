@@ -237,7 +237,13 @@ export class Hud {
         ? `冠军冲线！${summary.trackName ?? '赛道'}被你点亮。`
         : `最终名次 ${summary.rank}/${summary.total}`);
     this.el('#finish-time').textContent = formatTime(summary.time);
-    this.el('#finish-rank').textContent = `${summary.rank} / ${summary.total}`;
+    const rankEl = this.el('#finish-rank');
+    rankEl.textContent = `${summary.rank} / ${summary.total}`;
+    // Medal tint on the rank stat: the default (and 1st place) stays gold from
+    // .finish-stats, 2nd/3rd get silver/bronze so podium order reads at a
+    // glance without adding a column.
+    rankEl.classList.toggle('rank-2', summary.rank === 2);
+    rankEl.classList.toggle('rank-3', summary.rank === 3);
     this.el('#finish-lap').textContent = summary.bestLap == null ? '--:--.--' : formatTime(summary.bestLap);
     const rec = this.el('#finish-record');
     if (summary.newRecord) {
@@ -265,12 +271,20 @@ export class Hud {
 
   showCountdown(text: string): void {
     this.countdown.textContent = text;
+    // Each digit carries its own colour/beat (3 cyan → 2 violet → 1 magenta →
+    // GO gold), so the countdown reads as a rising sequence rather than four
+    // identical flashes.
+    this.countdown.dataset.digit =
+      text === '3' || text === '2' || text === '1' ? text : text === 'GO!' ? 'go' : '';
     this.countdown.classList.remove('show');
     void this.countdown.offsetWidth;
     this.countdown.classList.add('show');
     if (text === 'GO!') {
       window.setTimeout(() => {
-        if (this.countdown.textContent === 'GO!') this.countdown.textContent = '';
+        if (this.countdown.textContent === 'GO!') {
+          this.countdown.textContent = '';
+          this.countdown.dataset.digit = '';
+        }
       }, 700);
     }
   }
@@ -415,6 +429,9 @@ export class Hud {
     if (state.boosting !== last.hot) {
       last.hot = state.boosting;
       this.speedArc.classList.toggle('hot', state.boosting);
+      // The gear pill is the arc's companion readout: "B" with a lit gold
+      // treatment while boosting, back to the magenta idle otherwise.
+      this.gearValue.classList.toggle('boosting', state.boosting);
     }
 
     if (state.gear !== last.gear) {
@@ -519,8 +536,23 @@ export class Hud {
     }
 
     if (state.status !== last.status) {
-      last.status = state.status;
-      this.statusLine.textContent = state.status;
+      const statusText = state.status;
+      last.status = statusText;
+      this.statusLine.textContent = statusText;
+      // The rail colour doubles as a state light: boosting reads cyan, drifting
+      // magenta, off-track gold, the countdown violet, a duo lead gold. Derived
+      // 1:1 from the status string, so it changes exactly when the text does.
+      this.statusLine.dataset.state = statusText.includes('氮气加速')
+        ? 'boost'
+        : statusText.includes('漂移')
+          ? 'drift'
+          : statusText.includes('冲出赛道')
+            ? 'offtrack'
+            : statusText.includes('倒计时')
+              ? 'count'
+              : statusText.includes('领先')
+                ? 'lead'
+                : '';
     }
 
     if (state.trackPath && state.dots) {

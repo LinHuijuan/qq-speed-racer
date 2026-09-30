@@ -266,6 +266,12 @@ export class Game {
   private rng = createSeededRandom(7);
   private pausedForScreenshot = false;
   /**
+   * Whether losing window focus should pause the race. On by design (see
+   * `onWindowBlur`); the `setBlurPause` test hook turns it off so scripted
+   * runs — which blur on every tool-call boundary — can hold a state steady.
+   */
+  private blurPauseEnabled = true;
+  /**
    * Set by the `placeCamera` test hook. While it holds a pose the chase rig is
    * skipped and P1's camera is parked there, so a script can orbit the kart and
    * look at the model instead of at the back of it from 3m away. Null in normal
@@ -645,6 +651,7 @@ export class Game {
   private readonly onWindowBlur = () => this.autoPause();
 
   private autoPause(): void {
+    if (!this.blurPauseEnabled) return;
     // `helpOpen` already paused the race, and pausing again would put the pause
     // panel behind the sheet the player is reading.
     if (this.paused || this.helpOpen) return;
@@ -2383,6 +2390,16 @@ export class Game {
       },
       setPausedForScreenshot: (paused: boolean) => {
         this.pausedForScreenshot = paused;
+      },
+      /**
+       * Arms/disarms the blur auto-pause. A scripted run loses OS focus on
+       * every tool-call boundary, and each blur re-paused the race, so no
+       * countdown/boost screenshot could ever be taken between pauses.
+       * Default stays on — real players still get the "race stops when you
+       * stop watching" behaviour.
+       */
+      setBlurPause: (enabled: boolean) => {
+        this.blurPauseEnabled = enabled;
       },
       setReducedMotion: (enabled: boolean) => {
         this.reducedMotion = enabled;

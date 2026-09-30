@@ -33,6 +33,8 @@ declare global {
       /** Run N fixed 1/60 s simulation steps without waiting on the renderer. */
       stepSim?: (frames?: number) => { frames: number };
       setPausedForScreenshot: (paused: boolean) => void;
+      /** Disable the on-blur auto-pause so scripted runs can hold a state. */
+      setBlurPause: (enabled: boolean) => void;
       setReducedMotion: (enabled: boolean) => void;
       hideDebugUi: (hidden: boolean) => void;
       measureDrawCalls?: () => { calls: number; triangles: number; geometries: number };
