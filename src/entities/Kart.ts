@@ -7,6 +7,14 @@ export type KartConfig = {
   accent: THREE.ColorRepresentation;
   name: string;
   livery?: string;
+  /** Wheel glow-ring + LED dressing hue (defaults to `accent`). */
+  rimGlow?: THREE.ColorRepresentation;
+  /** Hood LED / strip emissive intensity — aggressive liveries run hotter. */
+  stripIntensity?: number;
+  /** Paint sheen multiplier on the env reflection. */
+  gloss?: number;
+  /** Canopy glass tint — darker for the stealth liveries. */
+  canopyTint?: THREE.ColorRepresentation;
 };
 
 export type KartState = {
@@ -243,6 +251,8 @@ type BodyGeometries = {
    *  join the lighting loop nor bloat the shader cache; their job is purely to
    *  feed the bloom pass a soft white pool. */
   headlightHalo: THREE.BufferGeometry;
+  /** Long additive wedges laid on the road ahead — the headlight throw. */
+  headlightBeam: THREE.BufferGeometry;
 };
 
 type WheelGeometries = {
@@ -401,6 +411,29 @@ function buildBodyGeometries(): BodyGeometries {
         geo: new THREE.TorusGeometry(0.32, 0.032, 8, 20, Math.PI),
         pos: [0, 0.8, -0.42],
       },
+      // Helmet visor — a dark-glass band across the head's front face. Sits on
+      // the dark head sphere (z front = 0.24) so the driver reads as a driver,
+      // not a ball, through the smoked canopy.
+      {
+        geo: new THREE.BoxGeometry(0.15, 0.05, 0.04),
+        pos: [0, 0.875, 0.225],
+      },
+      // Headrest pad behind the helmet — fills the bare shell face visible
+      // over the driver's shoulders in rear three-quarter views.
+      {
+        geo: new THREE.BoxGeometry(0.3, 0.09, 0.06),
+        pos: [0, 0.9, -0.32],
+      },
+      // Mirror heads — capped onto the carbon stalks with a lit underside so
+      // they read at race distance instead of vanishing into the hull.
+      {
+        geo: new THREE.BoxGeometry(0.09, 0.05, 0.03),
+        pos: [-BODY_WIDTH * 0.5, 0.875, 0.3],
+      },
+      {
+        geo: new THREE.BoxGeometry(0.09, 0.05, 0.03),
+        pos: [BODY_WIDTH * 0.5, 0.875, 0.3],
+      },
     ]),
     carbon: mergeParts([
       // Front splitter — the main plate. Moved here from the accent group: a
@@ -540,6 +573,11 @@ function buildBodyGeometries(): BodyGeometries {
       // Driver helmet hint — a low-poly sphere inside the canopy. At 0.10
       // radius it reads as a head shape without modelling a face.
       { geo: new THREE.SphereGeometry(0.1, 14, 10), pos: [0, 0.86, 0.14] },
+      // Helmet crest — a centreline ridge that turns the ball into a helmet.
+      {
+        geo: new THREE.BoxGeometry(0.05, 0.06, 0.2),
+        pos: [0, 0.945, 0.1],
+      },
       // Nose vent — a dark slot sunk into the nose tip's top face. Same job
       // as the canards: give the eye something other than a flat plane.
       {
@@ -550,6 +588,30 @@ function buildBodyGeometries(): BodyGeometries {
       // inset face is the same material so they show as a notch, not a slot.
       { geo: new THREE.BoxGeometry(0.04, 0.16, 0.5), pos: [-BODY_WIDTH * 0.42, 0.62, 0.05] },
       { geo: new THREE.BoxGeometry(0.04, 0.16, 0.5), pos: [BODY_WIDTH * 0.42, 0.62, 0.05] },
+      // Exhaust pair — twin pipes angled out of the rear deck. The old rear
+      // was wing + diffuser with no mechanical parts between them; pipes fill
+      // the gap and give the boost flames a place to come from.
+      {
+        geo: new THREE.CylinderGeometry(0.045, 0.055, 0.16, 10),
+        pos: [-0.18, 0.4, -BODY_LENGTH * 0.52],
+        rot: [Math.PI / 2 - 0.35, 0, 0],
+      },
+      {
+        geo: new THREE.CylinderGeometry(0.045, 0.055, 0.16, 10),
+        pos: [0.18, 0.4, -BODY_LENGTH * 0.52],
+        rot: [Math.PI / 2 - 0.35, 0, 0],
+      },
+      // Mirror stalks — short carbon arms off the canopy sides.
+      {
+        geo: new THREE.BoxGeometry(0.1, 0.02, 0.03),
+        pos: [-BODY_WIDTH * 0.44, 0.86, 0.28],
+        rot: [0, 0.5, 0],
+      },
+      {
+        geo: new THREE.BoxGeometry(0.1, 0.02, 0.03),
+        pos: [BODY_WIDTH * 0.44, 0.86, 0.28],
+        rot: [0, -0.5, 0],
+      },
     ]),
     glass: mergeParts([
       /*
@@ -630,6 +692,21 @@ function buildBodyGeometries(): BodyGeometries {
       {
         geo: new THREE.PlaneGeometry(0.2, 0.08),
         pos: [0.24, 0.4, BODY_LENGTH * 0.68],
+      },
+    ]),
+    // Headlight throw — two long wedges laid on the road ahead of each lamp,
+    // nose-down like a projector beam. Additive and unlit like the halos, so
+    // the kart reads as lighting the road instead of floating in it.
+    headlightBeam: mergeParts([
+      {
+        geo: new THREE.PlaneGeometry(0.5, 4.2),
+        pos: [-0.24, 0.02, BODY_LENGTH * 0.5 + 2.2],
+        rot: [-Math.PI / 2 + 0.06, 0, 0],
+      },
+      {
+        geo: new THREE.PlaneGeometry(0.5, 4.2),
+        pos: [0.24, 0.02, BODY_LENGTH * 0.5 + 2.2],
+        rot: [-Math.PI / 2 + 0.06, 0, 0],
       },
     ]),
   };
@@ -876,7 +953,7 @@ export class Kart {
           // nearly as bright as the chrome spokes in front of it, which is why
           // the wheel read as one flat disc. Matte and barely reflective now.
           color: '#12161d',
-          roughness: 0.72,
+          roughness: 0.68,
           metalness: 0.18,
           envMap: env,
           envMapIntensity: 0.15,
@@ -902,8 +979,8 @@ export class Kart {
       ),
       hub: this.track(
         new THREE.MeshStandardMaterial({
-          color: this.config.accent,
-          emissive: this.config.accent,
+          color: this.config.rimGlow ?? this.config.accent,
+          emissive: this.config.rimGlow ?? this.config.accent,
           emissiveIntensity: 0.35,
           roughness: 0.3,
           metalness: 0.6,
@@ -915,8 +992,8 @@ export class Kart {
       // (crimson #ff6b6b, violet #e040fb) without clipping the gold one.
       glowRing: this.track(
         new THREE.MeshStandardMaterial({
-          color: this.config.accent,
-          emissive: this.config.accent,
+          color: this.config.rimGlow ?? this.config.accent,
+          emissive: this.config.rimGlow ?? this.config.accent,
           emissiveIntensity: 1.1,
           roughness: 0.25,
           metalness: 0.4,
@@ -1084,7 +1161,9 @@ export class Kart {
         clearcoat: 1,
         clearcoatRoughness: 0.1,
         envMap: env,
-        envMapIntensity: 0.75,
+        // `gloss` is the per-livery sheen dial: the gold livery reflects like
+        // jewellery, the violet one stays satin.
+        envMapIntensity: 0.75 * (this.config.gloss ?? 1),
       }),
     );
     const accentMat = this.track(
@@ -1128,7 +1207,6 @@ export class Kart {
         // pass tried to refract the same pixels. A dark tint with transmission
         // near 1 and `transparent: false` lets the refraction do all the work,
         // so the canopy darkens its contents instead of washing them out.
-        color: '#1e4257',
         roughness: 0.12,
         metalness: 0,
         transmission: 0.9,
@@ -1149,13 +1227,14 @@ export class Kart {
         // surface whose whole job is to show what is around it.
         envMap: env,
         envMapIntensity: 1.4,
+        color: this.config.canopyTint ?? '#1e4257',
       }),
     );
     const stripMat = this.track(
       new THREE.MeshStandardMaterial({
         color: '#8a1840',
         emissive: '#ff2a6d',
-        emissiveIntensity: 0.7,
+        emissiveIntensity: 0.85,
         roughness: 0.4,
       }),
     );
@@ -1167,7 +1246,7 @@ export class Kart {
       new THREE.MeshStandardMaterial({
         color: this.config.accent,
         emissive: this.config.accent,
-        emissiveIntensity: 1.2,
+        emissiveIntensity: this.config.stripIntensity ?? 1.2,
         roughness: 0.3,
       }),
     );
@@ -1181,7 +1260,7 @@ export class Kart {
       new THREE.MeshBasicMaterial({
         color: this.config.accent,
         transparent: true,
-        opacity: 0.55,
+        opacity: 0.62,
         depthWrite: false,
       }),
     );
@@ -1195,7 +1274,7 @@ const headlightHaloMat = this.track(
   new THREE.MeshBasicMaterial({
     color: '#ddeeff',
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.26,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
@@ -1219,6 +1298,45 @@ const headlightHaloMat = this.track(
     group.add(new THREE.Mesh(geometries.tailLamps, tailMat));
     group.add(new THREE.Mesh(geometries.underbodyGlow, underbodyMat));
     group.add(new THREE.Mesh(geometries.headlightHalo, headlightHaloMat));
+    // Headlight throw — far dimmer than the halos (0.06): it is a gradient on
+    // the road, and at halo strength the two wedges would read as painted
+    // stripes rather than light.
+    group.add(
+      new THREE.Mesh(
+        geometries.headlightBeam,
+        this.track(
+          new THREE.MeshBasicMaterial({
+            color: '#cfe8ff',
+            transparent: true,
+            opacity: 0.06,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          }),
+        ),
+      ),
+    );
+
+    // Permanent contact shadow — a dark radial decal hugging the ground plane.
+    // Before this the karts floated: the key light casts a real shadow, but at
+    // chase distance the hard-edged offset shadow never touched the wheels, so
+    // nothing anchored the body to the asphalt. The glow falloff texture is
+    // reused as the alpha map, and normal blending (not additive) darkens.
+    const contactShadow = new THREE.Mesh(
+      kartGeometries().groundGlow,
+      this.track(
+        new THREE.MeshBasicMaterial({
+          color: '#000000',
+          alphaMap: glowTexture(),
+          transparent: true,
+          opacity: 0.42,
+          depthWrite: false,
+        }),
+      ),
+    );
+    contactShadow.rotation.x = -Math.PI / 2;
+    contactShadow.position.y = 0.012;
+    contactShadow.scale.set(1.35, 1.9, 1);
+    group.add(contactShadow);
 
     return group;
   }

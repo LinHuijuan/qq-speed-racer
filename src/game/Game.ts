@@ -921,6 +921,10 @@ export class Game {
       accent: style.accent,
       name: 'P1',
       livery: style.livery,
+      rimGlow: style.rimGlow,
+      stripIntensity: style.stripIntensity,
+      gloss: style.gloss,
+      canopyTint: style.canopyTint,
     });
     this.scene.add(this.player1.kart.group);
     this.rebuildKartRefs();
@@ -1586,8 +1590,77 @@ export class Game {
     sky.frustumCulled = false;
     this.scene.add(sky);
 
+    // Starfield — the sky dome was a clean gradient, which reads as dusk; a
+    // few hundred points high in the dome sell "clear night" for one draw
+    // call. Seeded scatter in the upper hemisphere only, away from the city
+    // glow band near the horizon.
+    {
+      const starCount = 420;
+      const positions = new Float32Array(starCount * 3);
+      let seed = 7;
+      const rand = () => {
+        seed = (seed * 16807) % 2147483647;
+        return seed / 2147483647;
+      };
+      for (let i = 0; i < starCount; i += 1) {
+        const theta = rand() * Math.PI * 2;
+        const phi = 0.18 + rand() * 1.05;
+        const r = 262;
+        positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+        positions[i * 3 + 1] = r * Math.cos(phi) * 0.9 + 20;
+        positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+      }
+      const starGeo = new THREE.BufferGeometry();
+      starGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const stars = new THREE.Points(
+        starGeo,
+        new THREE.PointsMaterial({
+          color: '#cfe0ff',
+          size: 1.1,
+          sizeAttenuation: false,
+          transparent: true,
+          opacity: 0.75,
+          depthWrite: false,
+          fog: false,
+        }),
+      );
+      stars.frustumCulled = false;
+      this.scene.add(stars);
+    }
+
+    // Moon — a lit disc with a halo, high over the start straight horizon.
+    {
+      const moon = new THREE.Group();
+      const disc = new THREE.Mesh(
+        new THREE.CircleGeometry(9, 32),
+        new THREE.MeshBasicMaterial({ color: '#e8f0ff', fog: false }),
+      );
+      moon.add(disc);
+      const halo = new THREE.Mesh(
+        new THREE.CircleGeometry(16, 32),
+        new THREE.MeshBasicMaterial({
+          color: '#aebfe0',
+          transparent: true,
+          opacity: 0.16,
+          depthWrite: false,
+          fog: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      halo.position.z = -1;
+      moon.add(halo);
+      moon.position.set(-150, 130, -210);
+      moon.lookAt(0, 30, 0);
+      this.scene.add(moon);
+    }
+
     this.scene.background = new THREE.Color('#0a1020');
-    this.scene.fog = new THREE.FogExp2('#0c1428', 0.0028);
+    // Per-track atmosphere: the layout may name its own fog colour/density so
+    // the harbour reads hazier than the mountain; neon is the default.
+    this.scene.fog = new THREE.FogExp2(
+      this.track.layout.fog ?? '#0c1428',
+      this.track.layout.fogDensity ?? 0.0028,
+    );
 
     const hemisphere = new THREE.HemisphereLight('#e0eeff', '#2a2840', 2.35);
     this.scene.add(hemisphere);

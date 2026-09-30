@@ -24,6 +24,8 @@ const MINE_LIFE = 12;
 const BOX_GEOMETRY = new THREE.BoxGeometry(0.95, 0.95, 0.95);
 const RING_GEOMETRY = new THREE.TorusGeometry(0.7, 0.06, 8, 24);
 const MINE_GEOMETRY = new THREE.SphereGeometry(0.35, 12, 12);
+/** Beacon column above each item box — open-ended so no bright top cap. */
+const PILLAR_GEOMETRY = new THREE.CylinderGeometry(0.5, 0.72, 6, 10, 1, true);
 
 export class ItemSystem {
   readonly group = new THREE.Group();
@@ -196,6 +198,26 @@ export class ItemSystem {
     ring2.rotation.y = Math.PI / 2;
     group.add(ring2);
 
+    // Beacon pillar — a faint additive column rising from the box, so pickups
+    // are findable from the far side of the track and the minimap has an
+    // on-road anchor. Shared material, one extra draw call per box.
+    if (!ItemSystem.pillarMaterial) {
+      ItemSystem.pillarMaterial = new THREE.MeshBasicMaterial({
+        color: '#9b6bff',
+        transparent: true,
+        opacity: 0.14,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      });
+    }
+    const pillar = new THREE.Mesh(PILLAR_GEOMETRY, ItemSystem.pillarMaterial);
+    pillar.position.y = 2.6;
+    group.add(pillar);
+
     return group;
   }
+
+  /** Shared additive material for every box's beacon pillar. */
+  private static pillarMaterial: THREE.MeshBasicMaterial | null = null;
 }

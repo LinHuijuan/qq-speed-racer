@@ -10,6 +10,8 @@ export type TrackLayout = {
   tension?: number;
   boostTs?: number[];
   fog?: string;
+  /** Exponential fog density — the harbour is hazier than the mountain. */
+  fogDensity?: number;
   accentA?: string;
   accentB?: string;
 };
@@ -18,6 +20,8 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
   {
     id: 'neon',
     name: '霓虹环城',
+    fog: '#0c1428',
+    fogDensity: 0.0028,
     desc: '均衡弯道 · 适合热身',
     tension: 0.35,
     boostTs: [0.08, 0.22, 0.41, 0.58, 0.77],
@@ -60,6 +64,8 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
   {
     id: 'hairpin',
     name: '发卡之都',
+    fog: '#10101e',
+    fogDensity: 0.0034,
     desc: '连续发卡 · 漂移天堂',
     tension: 0.25,
     boostTs: [0.1, 0.25, 0.4, 0.55, 0.7, 0.85],
@@ -107,6 +113,8 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
   {
     id: 'harbor',
     name: '港口极速',
+    fog: '#0c1826',
+    fogDensity: 0.0022,
     desc: '长直道 · 极速冲刺',
     tension: 0.4,
     boostTs: [0.05, 0.18, 0.35, 0.52, 0.68, 0.84],
@@ -144,6 +152,8 @@ export const TRACK_LAYOUTS: TrackLayout[] = [
   {
     id: 'mountain',
     name: '山道盘旋',
+    fog: '#0a1620',
+    fogDensity: 0.003,
     desc: '高低起伏 · 技术弯',
     tension: 0.3,
     boostTs: [0.12, 0.3, 0.48, 0.66, 0.82],

@@ -94,7 +94,16 @@ export class PlayerRacer {
   }
 
   /** Swap visual style without losing race state. */
-  applyStyle(config: { color: string; accent: string; name: string; livery?: string }): void {
+  applyStyle(config: {
+    color: string;
+    accent: string;
+    name: string;
+    livery?: string;
+    rimGlow?: string;
+    stripIntensity?: number;
+    gloss?: number;
+    canopyTint?: string;
+  }): void {
     const s = { ...this.kart.state };
     this.kart.dispose();
     this.kart = new Kart(config);

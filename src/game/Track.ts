@@ -46,6 +46,17 @@ export class Track {
   };
 
   private readonly startLine: THREE.Group;
+  /** Animated landmark/crowd refs, driven from update() at animation cost. */
+  private ferrisWheel: THREE.Group | null = null;
+  private spireMaterial: THREE.MeshBasicMaterial | null = null;
+  private readonly flags: THREE.Mesh[] = [];
+  /** Per-stand spectator head instances, for the cheap wave bob. */
+  private readonly crowdHeads: Array<{
+    mesh: THREE.InstancedMesh;
+    bases: Float32Array;
+    count: number;
+  }> = [];
+  private crowdPhase = 0;
   /** Reused by lateralOffset so the per-kart hot path allocates nothing. */
   private readonly lateralScratch = new THREE.Vector3();
   private readonly lateralResult = { lateral: 0, sample: null as unknown as TrackSample };
@@ -119,6 +130,37 @@ export class Track {
   }
 
   update(delta: number, elapsed: number): void {
+    // Landmarks and crowd animate here, off the hot per-frame paths: the ferris
+    // wheel turns at a lazy fairground rate, the tower beacon breathes, the
+    // flags sway, and every 4th frame the crowd heads bob one shared sine over
+    // per-instance phases (390 matrices every ~67ms — invisible cost, visible
+    // life).
+    if (this.ferrisWheel) this.ferrisWheel.rotation.z += delta * 0.06;
+    if (this.spireMaterial) {
+      this.spireMaterial.color.setHSL(0.11, 0.85, 0.55 + Math.sin(elapsed * 2.2) * 0.12);
+    }
+    for (let i = 0; i < this.flags.length; i += 1) {
+      this.flags[i].rotation.x = Math.sin(elapsed * 2.4 + i * 1.7) * 0.16;
+    }
+    this.crowdPhase += delta;
+    const frameOk = (this.crowdPhase * 60) % 4 < 1.001;
+    if (frameOk) {
+      const dummy = new THREE.Object3D();
+      for (const crowd of this.crowdHeads) {
+        for (let i = 0; i < crowd.count; i += 1) {
+          const bx = crowd.bases[i * 4];
+          const by = crowd.bases[i * 4 + 1];
+          const bz = crowd.bases[i * 4 + 2];
+          const br = crowd.bases[i * 4 + 3];
+          dummy.position.set(bx, by + Math.sin(this.crowdPhase * 3 + i * 0.73) * 0.045, bz);
+          dummy.rotation.set(0, br, 0);
+          dummy.scale.set(1, 1, 1);
+          dummy.updateMatrix();
+          crowd.mesh.setMatrixAt(i, dummy.matrix);
+        }
+        crowd.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
     for (const pad of this.boostPads) {
       if (!pad.active) {
         pad.respawn -= delta;
@@ -131,7 +173,7 @@ export class Track {
         pad.mesh.rotation.y = elapsed * 2.4;
         pad.mesh.position.y = 0.14 + Math.sin(elapsed * 4 + pad.position.x) * 0.06;
         const mat = pad.mesh.material as THREE.MeshStandardMaterial;
-        mat.emissiveIntensity = 0.7 + Math.sin(elapsed * 6 + pad.position.z) * 0.35;
+        mat.emissiveIntensity = 0.62 + Math.sin(elapsed * 6 + pad.position.z) * 0.3;
       }
     }
   }
@@ -366,7 +408,7 @@ export class Track {
 
   private buildCurbs(): void {
     // Red/white striped kerbs just outside the racing surface — key racing cue.
-    const curbGeo = new THREE.BoxGeometry(0.55, 0.08, 1.1);
+    const curbGeo = new THREE.BoxGeometry(0.58, 0.09, 1.1);
     const red = new THREE.MeshStandardMaterial({
       color: '#9a2a34',
       roughness: 0.7,
@@ -650,7 +692,7 @@ export class Track {
     geo.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({
       color: '#3a4250',
-      map: loadGameTexture('/assets/runoff.webp', { repeat: [2, 40] }),
+      map: loadGameTexture('/assets/runoff.webp', { repeat: [3, 46] }),
       roughness: 0.92,
       metalness: 0.02,
       side: THREE.DoubleSide,
@@ -665,7 +707,7 @@ export class Track {
       new THREE.PlaneGeometry(460, 460),
       new THREE.MeshStandardMaterial({
         color: '#3a4258',
-        map: loadGameTexture('/assets/ground-night.webp', { repeat: [40, 40] }),
+        map: loadGameTexture('/assets/ground-night.webp', { repeat: [52, 52] }),
         roughness: 1,
         metalness: 0,
       }),
@@ -794,7 +836,7 @@ export class Track {
           map: bbTex,
           emissive: color,
           emissiveMap: bbTex,
-          emissiveIntensity: 0.55,
+          emissiveIntensity: 0.65,
           roughness: 0.4,
           metalness: 0.2,
         }),
@@ -820,7 +862,7 @@ export class Track {
     const pylonMat = new THREE.MeshStandardMaterial({
       color: '#1a2438',
       emissive: '#147090',
-      emissiveIntensity: 0.22,
+      emissiveIntensity: 0.32,
       roughness: 0.5,
     });
     const pylons = new THREE.InstancedMesh(pylonGeo, pylonMat, 36);
@@ -986,6 +1028,36 @@ export class Track {
       this.group.add(mesh);
     });
 
+    // Traffic cones at the corner-exit apexes — orange with a white band, the
+    // one prop the eye parses as "circuit" faster than any neon. Instanced:
+    // one draw call for the lot.
+    const coneBodyGeo = new THREE.ConeGeometry(0.16, 0.42, 8);
+    const coneBodyMat = new THREE.MeshStandardMaterial({
+      color: '#ff7a1f',
+      emissive: '#ff7a1f',
+      emissiveIntensity: 0.35,
+      roughness: 0.5,
+    });
+    const trafficCones = new THREE.InstancedMesh(coneBodyGeo, coneBodyMat, 16);
+    let coneIdx = 0;
+    for (const t of cornerTs) {
+      const sample = this.sampleAt(t);
+      const sign = sample.tangent.x * sample.left.z - sample.tangent.z * sample.left.x > 0 ? 1 : -1;
+      const offset = sign * (ROAD_HALF_WIDTH + 1.6);
+      dummy.position.set(
+        sample.position.x + sample.left.x * offset,
+        0.21,
+        sample.position.z + sample.left.z * offset,
+      );
+      dummy.scale.set(1, 1, 1);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      if (coneIdx < 16) trafficCones.setMatrixAt(coneIdx++, dummy.matrix);
+    }
+    trafficCones.count = coneIdx;
+    trafficCones.instanceMatrix.needsUpdate = true;
+    this.group.add(trafficCones);
+
     // --- Grandstands (3 stands along long straights) ---
     const standSpots = [0.05, 0.35, 0.68];
     const spectatorColors = ['#ff6b6b', '#ffd166', '#6bcb77', '#4d96ff', '#c77dff', '#f8f9fa', '#ff9f1c'];
@@ -1031,10 +1103,60 @@ export class Track {
         stand.add(pillar);
       }
 
-      // Spectators (instanced capsules)
+      // Roof underside light strip — the stand reads as lit from within at
+      // night instead of as a dark slab floating over the crowd.
+      const standLight = new THREE.Mesh(
+        new THREE.BoxGeometry(18, 0.04, 0.3),
+        new THREE.MeshBasicMaterial({ color: '#fff2c8' }),
+      );
+      standLight.position.set(0, 5.24, side > 0 ? 0.5 : -0.5);
+      stand.add(standLight);
+
+      // Corner flags — two per stand. Cloth simulation is overkill: a triangle
+      // plane on a pole, swayed from update().
+      for (const fx of [-8.6, 8.6]) {
+        const pole = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.03, 0.03, 6.4, 6),
+          steel,
+        );
+        pole.position.set(fx, 5.2, side > 0 ? 3.4 : -3.4);
+        stand.add(pole);
+        const flag = new THREE.Mesh(
+          new THREE.BufferGeometry(),
+          new THREE.MeshBasicMaterial({
+            color: spectatorColors[(fx > 0 ? 3 : 1) % spectatorColors.length] ?? '#ffd166',
+            side: THREE.DoubleSide,
+          }),
+        );
+        // A triangle: three vertices, one face.
+        flag.geometry.setAttribute(
+          'position',
+          new THREE.Float32BufferAttribute([0, 0, 0, 0.9, 0.22, 0, 0, 0.5, 0], 3),
+        );
+        flag.geometry.computeVertexNormals();
+        flag.position.set(fx, 8.15, side > 0 ? 3.4 : -3.4);
+        stand.add(flag);
+        this.flags.push(flag);
+      }
+
+      /*
+       * Spectators (instanced capsules), upgraded from the old uniform block:
+       *
+       *   - 130 per stand (was 90) — the stands were visibly underfilled.
+       *   - Per-spectator height scale 0.88-1.14, so the rows stop reading as
+       *     stamped clones.
+       *   - Colour blocks: each tier backs one team colour at ~55% density,
+       *     with the other colours scattered through — a crowd with sections
+       *     reads as fans who came for someone, not as confetti.
+       *   - Two skin tones on the heads (two instanced meshes, split by roll).
+       *   - Every 14th spectator holds a support banner (a small coloured quad
+       *     overhead).
+       *   - Heads bob in update(): one shared sine over per-instance phases,
+       *     uploaded every 4th frame.
+       */
       const bodyGeo = new THREE.CapsuleGeometry(0.22, 0.55, 3, 6);
       const headGeo = new THREE.SphereGeometry(0.18, 6, 6);
-      const crowdCount = 90;
+      const crowdCount = 130;
       const bodies = spectatorColors.map(
         (c) =>
           new THREE.InstancedMesh(
@@ -1043,36 +1165,64 @@ export class Track {
             color: c,
             roughness: 0.75,
             emissive: c,
-            emissiveIntensity: 0.18,
+            emissiveIntensity: 0.26,
           }),
-            Math.ceil(crowdCount / spectatorColors.length) + 2,
+            Math.ceil(crowdCount / spectatorColors.length) + 8,
           ),
       );
-      const heads = new THREE.InstancedMesh(
-        headGeo,
-        new THREE.MeshStandardMaterial({ color: '#e0b898', roughness: 0.75 }),
-        crowdCount,
-      );
+      const headMatA = new THREE.MeshStandardMaterial({ color: '#e0b898', roughness: 0.75 });
+      const headMatB = new THREE.MeshStandardMaterial({ color: '#8a5c3c', roughness: 0.75 });
+      const headsA = new THREE.InstancedMesh(headGeo, headMatA, Math.ceil(crowdCount * 0.6));
+      const headsB = new THREE.InstancedMesh(headGeo, headMatB, Math.ceil(crowdCount * 0.4));
+      const headBases = new Float32Array(crowdCount * 4);
       const bodyIdx = spectatorColors.map(() => 0);
-      let headIdx = 0;
+      let headAIdx = 0;
+      let headBIdx = 0;
 
       for (let i = 0; i < crowdCount; i += 1) {
         const tier = Math.floor(rng() * 5);
         const seatX = (rng() - 0.5) * 15;
         const seatZ = side > 0 ? 3.2 - tier * 1.5 : -3.2 + tier * 1.5;
         const seatY = 0.9 + tier * 0.85 + 0.55;
-        const ci = Math.floor(rng() * spectatorColors.length);
+        const scale = 0.88 + rng() * 0.26;
+        // Tier colour block with scatter.
+        const ci = rng() < 0.55 ? tier : Math.floor(rng() * spectatorColors.length);
+        const ry = (rng() - 0.5) * 0.4;
         dummy.position.set(seatX, seatY, seatZ);
-        dummy.rotation.set(0, (rng() - 0.5) * 0.4, 0);
-        dummy.scale.set(1, 1, 1);
+        dummy.rotation.set(0, ry, 0);
+        dummy.scale.set(1, scale, 1);
         dummy.updateMatrix();
         if (bodyIdx[ci] < bodies[ci].count) {
           bodies[ci].setMatrixAt(bodyIdx[ci]++, dummy.matrix);
         }
-        dummy.position.y = seatY + 0.55;
+        const headY = seatY + 0.35 + 0.62 * scale;
+        const darkSkin = rng() < 0.35;
+        dummy.position.set(seatX, headY, seatZ);
+        dummy.scale.set(1, 1, 1);
         dummy.updateMatrix();
-        if (headIdx < heads.count) {
-          heads.setMatrixAt(headIdx++, dummy.matrix);
+        if (darkSkin) {
+          if (headBIdx < headsB.count) headsB.setMatrixAt(headBIdx++, dummy.matrix);
+        } else if (headAIdx < headsA.count) {
+          headsA.setMatrixAt(headAIdx++, dummy.matrix);
+        }
+        headBases[i * 4] = seatX;
+        headBases[i * 4 + 1] = headY;
+        headBases[i * 4 + 2] = seatZ;
+        headBases[i * 4 + 3] = ry;
+
+        // Support banners — small coloured quads held overhead, ~7% of the
+        // crowd. Cheaper than arms, and from the track they read as waving.
+        if (i % 14 === 0) {
+          const banner = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.66, 0.4),
+            new THREE.MeshBasicMaterial({
+              color: spectatorColors[(i + tier) % spectatorColors.length] ?? '#ffd166',
+              side: THREE.DoubleSide,
+            }),
+          );
+          banner.position.set(seatX, headY + 0.42, seatZ);
+          banner.rotation.y = ry;
+          stand.add(banner);
         }
       }
       bodies.forEach((b, i) => {
@@ -1080,9 +1230,14 @@ export class Track {
         b.instanceMatrix.needsUpdate = true;
         stand.add(b);
       });
-      heads.count = headIdx;
-      heads.instanceMatrix.needsUpdate = true;
-      stand.add(heads);
+      headsA.count = headAIdx;
+      headsB.count = headBIdx;
+      headsA.instanceMatrix.needsUpdate = true;
+      headsB.instanceMatrix.needsUpdate = true;
+      stand.add(headsA);
+      stand.add(headsB);
+      this.crowdHeads.push({ mesh: headsA, bases: headBases, count: headAIdx });
+      this.crowdHeads.push({ mesh: headsB, bases: headBases, count: headBIdx });
 
       this.group.add(stand);
     }
@@ -1097,8 +1252,8 @@ export class Track {
         color: '#1a2240',
         roughness: 0.45,
         metalness: 0.4,
-        emissive: '#0a1830',
-        emissiveIntensity: 0.4,
+        emissive: '#122a52',
+        emissiveIntensity: 0.55,
       }),
     );
     towerBody.position.y = 21;
@@ -1113,13 +1268,13 @@ export class Track {
       ring.position.y = 6 + i * 4.5;
       tower.add(ring);
     }
-    const spire = new THREE.Mesh(
-      new THREE.ConeGeometry(2, 8, 8),
-      new THREE.MeshBasicMaterial({ color: '#ffd166' }),
-    );
+    const spireMat = new THREE.MeshBasicMaterial({ color: '#ffd166' });
+    const spire = new THREE.Mesh(new THREE.ConeGeometry(2, 8, 8), spireMat);
     spire.position.y = 46;
     tower.add(spire);
     this.group.add(tower);
+    // Stored for the update() breathing pulse.
+    this.spireMaterial = spireMat;
 
     // --- Landmark: neon arch over a mid-track section ---
     const archSample = this.sampleAt(0.5);
@@ -1139,7 +1294,7 @@ export class Track {
       new THREE.MeshStandardMaterial({
         color: '#1a2840',
         emissive: '#2de2ff',
-        emissiveIntensity: 0.8,
+        emissiveIntensity: 0.95,
         roughness: 0.35,
       }),
     );
@@ -1162,7 +1317,7 @@ export class Track {
       new THREE.MeshStandardMaterial({
         color: '#2a3148',
         emissive: '#4a90c8',
-        emissiveIntensity: 0.35,
+        emissiveIntensity: 0.5,
         roughness: 0.4,
         metalness: 0.5,
       }),
@@ -1190,6 +1345,20 @@ export class Track {
       cabin.position.set(Math.cos(a) * 14, 18 + Math.sin(a) * 14, 0);
       ferris.add(cabin);
     }
+    // Rim bulbs — twelve emissive spheres pinned to the wheel ring, so the
+    // wheel reads as a lit fairground ride from anywhere on track instead of
+    // as a dark silhouette.
+    for (let i = 0; i < 12; i += 1) {
+      const a = (i / 12) * Math.PI * 2;
+      const bulb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.22, 8, 6),
+        new THREE.MeshBasicMaterial({
+          color: spectatorColors[i % spectatorColors.length] ?? '#ffd166',
+        }),
+      );
+      bulb.position.set(Math.cos(a) * 14, 18 + Math.sin(a) * 14, 0);
+      ferris.add(bulb);
+    }
     const support = new THREE.Mesh(
       new THREE.BoxGeometry(1.2, 18, 1.2),
       new THREE.MeshStandardMaterial({ color: '#3a4258', roughness: 0.5, metalness: 0.4 }),
@@ -1202,6 +1371,8 @@ export class Track {
     support2.rotation.z = -0.18;
     ferris.add(support2);
     this.group.add(ferris);
+    // Stored for the slow fairground rotation in update().
+    this.ferrisWheel = ferris;
 
     // --- Trackside light poles with glow discs ---
     const lampGeo = new THREE.SphereGeometry(0.35, 8, 8);
@@ -1237,9 +1408,41 @@ export class Track {
     lamps.instanceMatrix.needsUpdate = true;
     this.group.add(poles, lamps);
 
+    // Light cones under every lamp — one instanced additive mesh, so 28 pools
+    // of lamplight cost a single draw call. Without them the lamps are bright
+    // dots lighting nothing.
+    const coneGeo = new THREE.CylinderGeometry(0.5, 3.4, 7, 10, 1, true);
+    const coneMat = new THREE.MeshBasicMaterial({
+      color: '#fff2c8',
+      transparent: true,
+      opacity: 0.055,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    const cones = new THREE.InstancedMesh(coneGeo, coneMat, 28);
+    let ci2 = 0;
+    for (let i = 0; i < 28; i += 1) {
+      const sample = this.samples[Math.floor((i / 28) * SAMPLE_COUNT)];
+      const side = i % 2 === 0 ? -1 : 1;
+      const nearStart = (i / 28) < 0.06 || (i / 28) > 0.94;
+      const offset = side * (ROAD_HALF_WIDTH + (nearStart ? 9.5 : 3.2));
+      dummy.position.set(
+        sample.position.x + sample.left.x * offset,
+        3.55,
+        sample.position.z + sample.left.z * offset,
+      );
+      dummy.scale.set(1, 1, 1);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      cones.setMatrixAt(ci2++, dummy.matrix);
+    }
+    cones.instanceMatrix.needsUpdate = true;
+    this.group.add(cones);
+
     // --- Directional chevrons on outer walls ---
     const chevronMat = new THREE.MeshBasicMaterial({
-      color: '#ffd166',
+      color: '#ffe08a',
       side: THREE.DoubleSide,
     });
     for (let i = 0; i < 16; i += 1) {
@@ -1395,6 +1598,16 @@ export class Track {
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.02;
       mesh.add(ring);
+      // Direction chevrons — two white arrows on the pad face so the boost
+      // reads as "go THIS way" at a glance, not just as a glowing disc.
+      const chevronMat = new THREE.MeshBasicMaterial({ color: '#f2f6ff' });
+      for (const cz of [-0.55, 0.35]) {
+        const chev = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.5, 3), chevronMat);
+        chev.rotation.x = Math.PI / 2;
+        chev.scale.set(1, 1, 0.28);
+        chev.position.set(0, 0.1, cz);
+        mesh.add(chev);
+      }
       this.group.add(mesh);
       return {
         position: mesh.position.clone(),
@@ -1410,7 +1623,7 @@ export class Track {
     const group = new THREE.Group();
     const sample = this.sampleAt(0);
     const checkerTex = loadGameTexture('/assets/start-checker.webp', { repeat: [1, 1] });
-    const geometry = new THREE.PlaneGeometry(ROAD_HALF_WIDTH * 2, 2.8);
+    const geometry = new THREE.PlaneGeometry(ROAD_HALF_WIDTH * 2.1, 3.1);
     const material = new THREE.MeshBasicMaterial({
       map: checkerTex,
       side: THREE.DoubleSide,
@@ -1474,6 +1687,88 @@ export class Track {
     beamNeon2.position.set(sample.position.x, 9.6, sample.position.z);
     beamNeon2.rotation.y = Math.atan2(sample.tangent.x, sample.tangent.z);
     group.add(beamNeon2);
+
+    // Grid slot marks — two rows of white corner brackets where the karts line
+    // up. Before this the grid was invisible paint; the karts looked parked on
+    // an arbitrary spot of tarmac.
+    const gridMarkMat = new THREE.MeshBasicMaterial({ color: '#e8f0ff' });
+    const gridRows = [0.6, 3.4, 6.2];
+    const gridLanes = [-2.6, 2.6];
+    for (const back of gridRows) {
+      for (const lane of gridLanes) {
+        const slot = new THREE.Group();
+        for (const [dx, dz, w, d] of [
+          [-0.55, -0.8, 1.1, 0.09],
+          [-0.55, 0.8, 1.1, 0.09],
+          [-0.55, -0.8, 0.09, 1.6],
+        ] as const) {
+          const bar = new THREE.Mesh(new THREE.PlaneGeometry(w, d), gridMarkMat);
+          bar.rotation.x = -Math.PI / 2;
+          bar.position.set(dx, 0.045, dz);
+          slot.add(bar);
+        }
+        slot.position.set(
+          sample.position.x + sample.left.x * lane - sample.tangent.x * back,
+          0,
+          sample.position.z + sample.left.z * lane - sample.tangent.z * back,
+        );
+        slot.rotation.y = Math.atan2(sample.tangent.x, sample.tangent.z);
+        group.add(slot);
+      }
+    }
+
+    // Start-light cluster — five lamps hanging off the beam's track side. Lit
+    // green with the middle one brightest: the classic launch-tree silhouette,
+    // readable in the opening countdown shot.
+    const lampBank = new THREE.Group();
+    const lampRig = new THREE.Mesh(
+      new THREE.BoxGeometry(4.6, 0.24, 0.18),
+      archMat,
+    );
+    lampBank.add(lampRig);
+    for (let i = 0; i < 5; i += 1) {
+      const lit = new THREE.Mesh(
+        new THREE.CircleGeometry(0.16, 16),
+        new THREE.MeshBasicMaterial({
+          color: i === 2 ? '#7cff6b' : '#2a4a30',
+        }),
+      );
+      lit.position.set((i - 2) * 1.05, -0.28, 0.02);
+      lampBank.add(lit);
+    }
+    lampBank.position.set(
+      sample.position.x + sample.tangent.x * 1.2,
+      8.35,
+      sample.position.z + sample.tangent.z * 1.2,
+    );
+    lampBank.rotation.y = Math.atan2(sample.tangent.x, sample.tangent.z);
+    group.add(lampBank);
+
+    // Checker band on the beam face — ties the gantry to the painted start
+    // line under it. A tiny canvas texture, generated once.
+    const checkerCanvas = document.createElement('canvas');
+    checkerCanvas.width = 128;
+    checkerCanvas.height = 16;
+    const cctx = checkerCanvas.getContext('2d');
+    if (cctx) {
+      for (let i = 0; i < 32; i += 1) {
+        cctx.fillStyle = i % 2 === 0 ? '#f2f6ff' : '#0a0e1e';
+        cctx.fillRect(i * 4, 0, 4, 16);
+      }
+    }
+    const beamCheckerTex = new THREE.CanvasTexture(checkerCanvas);
+    beamCheckerTex.colorSpace = THREE.SRGBColorSpace;
+    const beamChecker = new THREE.Mesh(
+      new THREE.PlaneGeometry((ROAD_HALF_WIDTH + 1.2) * 2, 0.5),
+      new THREE.MeshBasicMaterial({ map: beamCheckerTex }),
+    );
+    beamChecker.position.set(
+      sample.position.x - sample.tangent.x * 0.5,
+      9.2,
+      sample.position.z - sample.tangent.z * 0.5,
+    );
+    beamChecker.rotation.y = Math.atan2(sample.tangent.x, sample.tangent.z) + Math.PI;
+    group.add(beamChecker);
 
     return group;
   }
