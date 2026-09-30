@@ -6,3 +6,7 @@ artifacts/
 assets-textured/
 *.log
 .DS_Store
+
+# Playwright runs (screenshots, traces, error contexts)
+test-results/
+playwright-report/

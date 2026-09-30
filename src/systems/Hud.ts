@@ -357,6 +357,9 @@ export class Hud {
     if (key === this.coachKey) return;
     this.coachKey = key;
     this.coachHint.classList.toggle('visible', visible);
+    // The step badge recolours per step (cyan → violet → magenta → gold), same
+    // sequence as the help sheet's numbered badges.
+    this.coachHint.dataset.step = visible ? String(step) : '';
     if (!visible) return;
     this.coachText.textContent = text as string;
     this.coachStep.textContent = `${step}/${total}`;
@@ -437,6 +440,8 @@ export class Hud {
     if (state.gear !== last.gear) {
       last.gear = state.gear;
       this.gearValue.textContent = state.gear;
+      // Neutral is not a gear in use — dim it until the kart rolls.
+      this.gearValue.dataset.idle = String(state.gear === 'N');
     }
 
     const nitroPct = `${Math.round(state.nitro * 100)}%`;
@@ -599,9 +604,16 @@ export class Hud {
 
     for (const dot of dots) {
       ctx.beginPath();
+      // Player dots carry a soft glow so the eye lands on "me" first; rivals
+      // stay flat so they read as scenery until they matter.
+      if (dot.isPlayer) {
+        ctx.shadowColor = dot.color;
+        ctx.shadowBlur = 8;
+      }
       ctx.arc(sx(dot.x), sy(dot.z), dot.isPlayer ? 4.5 : 3.2, 0, Math.PI * 2);
       ctx.fillStyle = dot.color;
       ctx.fill();
+      ctx.shadowBlur = 0;
       if (dot.isPlayer) {
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;

@@ -3364,7 +3364,7 @@ body.duo-mode #touch-controls {
 @media (max-height: 780px) {
   .panel {
     max-height: min(94vh, 780px);
-    padding: 20px 26px 16px;
+    padding: 16px 26px 12px;
   }
 
   .panel h1,
@@ -3373,34 +3373,739 @@ body.duo-mode #touch-controls {
   }
 
   .lead {
-    margin-top: 8px;
+    margin-top: 6px;
   }
 
   .eyebrow {
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .mode-select {
-    margin: 12px 0 6px;
+    margin: 8px 0 5px;
   }
 
   .track-picker {
-    margin: 8px 0 4px;
+    margin: 6px 0 3px;
   }
 
   .car-picker {
-    margin: 6px 0 4px;
+    margin: 5px 0 3px;
   }
 
   .settings-block {
-    margin: 10px 0;
+    margin: 8px 0;
   }
 
   .controls-list {
-    margin: 10px 0;
+    margin: 8px 0;
   }
 
   .hint {
-    margin-top: 8px;
+    margin-top: 3px;
+    line-height: 1.45;
   }
+}
+
+/*
+ * ============================================================
+ * UI polish pass — global foundations
+ * ============================================================
+ */
+
+/* Theme the text selection instead of the stock focus-blue. */
+::selection {
+  background: rgba(45, 226, 255, 0.32);
+  color: #fff;
+}
+
+/* No grey tap flash on phones; taps are already answered by :active styles. */
+html {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+button,
+#touch-controls button {
+  touch-action: manipulation;
+}
+
+/* The HUD is a dashboard, not a document — dragging across it must not select
+   labels mid-race. Panels stay selectable (the help sheet is a reference). */
+#hud,
+#touch-controls,
+#countdown,
+#pip-frame {
+  user-select: none;
+}
+
+/*
+ * Themed panel scrollbar. The stock grey thumb looked like a different app
+ * inside the neon panel; this one is a hairline cyan that only deepens on
+ * hover. scrollbar-gutter keeps the layout from shifting when a scroll appears.
+ */
+.panel {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(45, 226, 255, 0.35) transparent;
+}
+
+.panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(45, 226, 255, 0.3);
+}
+
+.panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(45, 226, 255, 0.55);
+}
+
+/*
+ * Panels that rely on backdrop-filter get a readable fallback where it is
+ * unsupported: a more opaque surface instead of a blur that will never happen.
+ */
+@supports not (backdrop-filter: blur(1px)) {
+  .overlay {
+    background: radial-gradient(ellipse at center, rgba(4, 6, 14, 0.72), rgba(2, 4, 10, 0.92));
+  }
+
+  .hud-chip,
+  .nitro-cluster,
+  #status-line {
+    background-image:
+      linear-gradient(160deg, rgba(20, 28, 54, 0.97), rgba(9, 13, 28, 0.95)),
+      linear-gradient(160deg, rgba(45, 226, 255, 0.8), rgba(238, 244, 255, 0.14) 52%, rgba(255, 60, 172, 0.55));
+  }
+}
+
+/* Keycaps: a raised two-face key instead of a flat bordered box. */
+kbd {
+  padding: 1px 7px;
+  border: 1px solid rgba(238, 244, 255, 0.22);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(48, 60, 92, 0.9), rgba(22, 30, 54, 0.9));
+  color: var(--ink);
+  font-size: 0.86em;
+  font-weight: 700;
+  line-height: 1.5;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+/* High-contrast preference: firm up the hairlines text sits against. */
+@media (prefers-contrast: more) {
+  .hud-chip,
+  .nitro-cluster,
+  .item-slot,
+  #status-line {
+    border-color: rgba(238, 244, 255, 0.45);
+  }
+
+  .panel {
+    border-color: rgba(238, 244, 255, 0.4);
+  }
+}
+
+/*
+ * ============================================================
+ * UI polish pass — menu & panels
+ * ============================================================
+ */
+
+/* Panels rise into place once. transform-only on purpose: an opacity keyframe
+   would leave them invisible under headless SwiftShader (frozen timeline). */
+.overlay.visible .panel {
+  animation: panel-rise 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes panel-rise {
+  from {
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* The eyebrow rule breathes once per beat — a quiet "this is a masthead". */
+.eyebrow::after {
+  animation: eyebrow-breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes eyebrow-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Mode pills: the active pill gets an inner top-light, matching the chips. */
+.mode-btn.active {
+  box-shadow:
+    var(--hairline),
+    0 6px 18px rgba(0, 0, 0, 0.4),
+    0 0 22px -8px rgba(45, 226, 255, 1);
+}
+
+/* Track cards lift on hover, settle back on press. */
+.track-btn {
+  transition:
+    transform 0.12s ease,
+    filter 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.track-btn:hover {
+  transform: translateY(-2px);
+}
+
+.track-btn:active {
+  transform: translateY(0) scale(0.985);
+  filter: brightness(1.1);
+}
+
+.track-btn.active {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    0 6px 18px rgba(0, 0, 0, 0.4),
+    0 0 22px -6px rgba(var(--track-rgb, 45 226 255), 1);
+}
+
+/* Car cards mirror the track-card motion so the two rows feel related. */
+.car-btn {
+  transition:
+    transform 0.12s ease,
+    filter 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.car-btn:hover {
+  transform: translateY(-2px);
+}
+
+/* The colour swatch reads as a painted sphere: top light, ground shadow. */
+.car-btn .swatch {
+  box-shadow:
+    inset 0 2px 3px rgba(255, 255, 255, 0.55),
+    inset 0 -3px 5px rgba(0, 0, 0, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+/* Setting rows separated by hairlines instead of floating in space. */
+.setting-row {
+  padding: 4px 0;
+}
+
+.setting-row + .setting-row {
+  border-top: 1px solid rgba(238, 244, 255, 0.08);
+}
+
+/* P1/P2 keys in the controls list pick up their on-screen kart colours. */
+.controls-list strong:first-child {
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(45, 226, 255, 0.5);
+}
+
+.controls-list .duo-only strong {
+  color: #ffb066;
+  text-shadow: 0 0 10px rgba(255, 138, 31, 0.5);
+}
+
+/* A hairline before the controls block separates reference from settings. */
+.controls-list {
+  position: relative;
+}
+
+.controls-list::before {
+  content: '';
+  display: block;
+  height: 1px;
+  /* Budgeted tight: the short-viewport block spends every spare pixel keeping
+     the CTA above the fold at 1280x720, so the divider gets 8px, not 12. */
+  margin: 0 auto 7px;
+  width: 72%;
+  background: linear-gradient(90deg, transparent, rgba(45, 226, 255, 0.35), transparent);
+}
+
+/* Disabled "已开启" coach button reads as spent, not broken. */
+.panel button:disabled {
+  opacity: 0.55;
+  filter: saturate(0.4);
+  cursor: default;
+}
+
+/* Help sheet: step badges step through the HUD palette as the list descends. */
+.help-steps li:nth-child(1)::before {
+  background: linear-gradient(160deg, #9ef6ff, var(--cyan));
+}
+
+.help-steps li:nth-child(2)::before {
+  background: linear-gradient(160deg, #c9b6ff, #9b6bff);
+}
+
+.help-steps li:nth-child(3)::before {
+  background: linear-gradient(160deg, #ff9ad5, var(--magenta));
+}
+
+.help-steps li:nth-child(4)::before {
+  background: linear-gradient(160deg, #ffe9a8, var(--gold));
+}
+
+.help-steps li {
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.help-steps li:hover {
+  border-color: rgba(45, 226, 255, 0.4);
+}
+
+/* Finish stats get column separators; the total time leads in size. */
+.finish-stats div + div {
+  border-left: 1px solid rgba(238, 244, 255, 0.1);
+}
+
+.finish-stats div:first-child strong {
+  font-size: 1.2rem;
+}
+
+.finish-stats strong {
+  transition: color 0.2s ease;
+}
+
+/* The record line earns attention without shouting: a slow gold shimmer. */
+#finish-record {
+  animation: record-shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes record-shimmer {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.35);
+  }
+}
+
+/* Duo keyboard hint styled as keycaps-in-a-pill. */
+.duo-keys {
+  border: 1px solid rgba(255, 138, 31, 0.35);
+  border-radius: 999px;
+  background: rgba(40, 22, 6, 0.6);
+  color: #ffb066;
+}
+
+/* Secondary buttons answer the pointer like every other control. */
+.secondary-btn:hover {
+  filter: brightness(1.16);
+}
+
+.secondary-btn:active {
+  transform: scale(0.98);
+}
+
+/*
+ * ============================================================
+ * UI polish pass — in-race HUD
+ * ============================================================
+ */
+
+/* Rank and lap are the two numbers eyes flick to; let them lead the row. */
+#rank-value,
+#lap-value {
+  font-size: 1.05rem;
+}
+
+#timer-value,
+#best-value,
+#p2-speed {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The status chip slides in when its text first appears. */
+#status-line {
+  animation: status-in 0.25s ease-out;
+}
+
+@keyframes status-in {
+  from {
+    transform: translateX(var(--status-slide, 8px));
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@media (min-width: 900px) {
+  #status-line {
+    --status-slide: -8px;
+  }
+}
+
+/*
+ * Speed ring bezel ticks: a dashed ring hugging the SVG arc, reading as an
+ * instrument bezel rather than a bare circle. Purely decorative.
+ */
+.speed-ring::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border: 1px dashed rgba(45, 226, 255, 0.22);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.speed-ring {
+  position: relative;
+}
+
+/* Idle gear dims — "N" is not a gear you are using. */
+.gear-tag[data-idle='true'] {
+  filter: saturate(0.55) brightness(0.85);
+}
+
+/* A full nitro tank lights the bezel from outside the bar, not just the fill. */
+.nitro-bar:has(.nitro-fill.full) {
+  border-color: rgba(255, 209, 102, 0.55);
+  box-shadow:
+    inset 0 0 12px rgba(0, 0, 0, 0.55),
+    0 0 16px -2px rgba(255, 209, 102, 0.8);
+}
+
+/* Empty item slot: the "?" breathes, asking to be filled. */
+.item-slot:not(.has-item) {
+  animation: slot-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes slot-breathe {
+  0%,
+  100% {
+    color: rgba(238, 244, 255, 0.32);
+  }
+  50% {
+    color: rgba(238, 244, 255, 0.55);
+  }
+}
+
+/* Item label answers the slot: cyan while an item waits. */
+.item-label.has-item .item-label-use {
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(45, 226, 255, 0.4);
+}
+
+/* Duo P2 readouts take the orange of P2's kart, not P1's cyan. */
+.duo-panel .nitro-label strong,
+.p2-gear {
+  color: #ffb066;
+}
+
+.duo-panel .p2-fill {
+  background: linear-gradient(90deg, #ffb066, #ff8a1f 55%, var(--magenta));
+}
+
+/* Coach badge steps through the same palette as the help sheet badges. */
+#coach-hint[data-step='1'] .alert-badge {
+  background: linear-gradient(160deg, #9ef6ff, var(--cyan));
+}
+
+#coach-hint[data-step='2'] .alert-badge {
+  background: linear-gradient(160deg, #c9b6ff, #9b6bff);
+}
+
+#coach-hint[data-step='3'] .alert-badge {
+  background: linear-gradient(160deg, #ff9ad5, var(--magenta));
+}
+
+#coach-hint[data-step='4'] .alert-badge {
+  background: linear-gradient(160deg, #ffe9a8, var(--gold));
+}
+
+.alert-badge {
+  transition: background 0.2s ease;
+}
+
+/* Alert icons sit on tinted discs instead of floating loose. */
+.alert-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(238, 244, 255, 0.14);
+  font-size: 0.8rem;
+}
+
+.alert-danger .alert-icon {
+  background: rgba(255, 79, 122, 0.28);
+  animation: alert-icon-blink 0.9s ease-in-out infinite;
+}
+
+@keyframes alert-icon-blink {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.6);
+  }
+}
+
+.alert-hint .alert-icon {
+  background: rgba(255, 209, 102, 0.24);
+}
+
+/* Off-track help: the border breathes to keep it findable peripherally. */
+#offtrack-help.visible {
+  animation: offtrack-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes offtrack-breathe {
+  0%,
+  100% {
+    border-color: rgba(255, 209, 102, 0.55);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+  50% {
+    border-color: rgba(255, 209, 102, 0.95);
+    box-shadow:
+      0 8px 24px rgba(0, 0, 0, 0.35),
+      0 0 18px -4px rgba(255, 209, 102, 0.9);
+  }
+}
+
+/* Combo chips join the pill language: rounded, gradient ring, edge light. */
+.combo-chip {
+  border-radius: 10px;
+  background-image:
+    linear-gradient(160deg, rgba(40, 30, 10, 0.92), rgba(18, 13, 6, 0.9)),
+    linear-gradient(160deg, rgba(255, 209, 102, 0.9), rgba(255, 150, 70, 0.35));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+/* PiP frame label reads as a mini title bar. */
+.pip-label {
+  background: linear-gradient(160deg, rgba(52, 40, 10, 0.95), rgba(22, 16, 6, 0.92));
+  color: var(--gold);
+}
+
+/*
+ * ============================================================
+ * UI polish pass — touch, mobile & small screens
+ * ============================================================
+ */
+
+/* The stick answers the finger: bezel brightens, knob swells while steering. */
+#touch-stick:active {
+  border-color: rgba(45, 226, 255, 0.85);
+  box-shadow:
+    0 0 26px rgba(45, 226, 255, 0.5),
+    inset 0 0 24px rgba(45, 226, 255, 0.18);
+}
+
+#touch-stick:active #touch-knob {
+  transform: translate(-50%, -50%) scale(1.08);
+  filter: brightness(1.15);
+}
+
+#touch-knob {
+  transition:
+    transform 0.12s ease,
+    filter 0.12s ease;
+}
+
+/* Action buttons get the same hairline top-light as every glass surface. */
+.touch-actions button {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+/* Counters stay tabular on the phone HUD too. */
+#timer-value,
+#best-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Portrait: tighter chip row so six chips fit without wrapping on 360px. */
+@media (pointer: coarse) and (orientation: portrait) {
+  .hud-chip {
+    min-width: 0;
+    padding: 6px 9px;
+  }
+
+  .hud-chip .label {
+    font-size: 0.58rem;
+  }
+
+  #status-line {
+    max-width: 60vw;
+  }
+
+  .countdown::before {
+    width: 180px;
+    height: 180px;
+    margin: -90px 0 0 -90px;
+  }
+}
+
+/* Landscape phones: the FAB and PiP toggle shrink to the corner they own. */
+@media (orientation: landscape) and (max-height: 480px) {
+  #pause-fab,
+  #pip-toggle {
+    width: 40px;
+  }
+
+  #pip-toggle {
+    height: 34px;
+    top: max(60px, calc(env(safe-area-inset-top) + 60px));
+  }
+}
+
+/*
+ * ============================================================
+ * UI polish pass — typography & fine detail
+ * ============================================================
+ */
+
+/* Headline: near + far glow layers read as neon tubing, not a blur blob. */
+.panel h1,
+.panel h2 {
+  text-shadow:
+    0 0 6px rgba(255, 255, 255, 0.35),
+    0 0 22px rgba(45, 226, 255, 0.55),
+    0 0 48px rgba(255, 60, 172, 0.35);
+}
+
+/* Lead line breathes a little wider and a little brighter. */
+.lead {
+  letter-spacing: 0.04em;
+  color: rgba(230, 238, 255, 0.78);
+}
+
+/* The primary CTA floats: a warm under-shadow sells the press target. */
+#start-button {
+  box-shadow:
+    var(--hairline),
+    0 10px 26px rgba(0, 0, 0, 0.5),
+    0 6px 30px -6px rgba(255, 60, 172, 0.75),
+    0 4px 26px -8px rgba(45, 226, 255, 0.75);
+}
+
+/* Track/car meta: one consistent mute level across both card rows. */
+.track-meta span,
+.car-desc {
+  color: rgba(230, 238, 255, 0.55);
+}
+
+/* Chip labels share one tracking rhythm. */
+.hud-chip .label {
+  letter-spacing: 0.1em;
+}
+
+.hud-chip strong {
+  letter-spacing: 0.02em;
+}
+
+/* The best-lap chip reads gold end to end, not just its rail. */
+.hud-chip.best strong {
+  color: var(--gold);
+  text-shadow: 0 0 12px rgba(255, 209, 102, 0.45);
+}
+
+/* Off-track status: the text itself goes gold with the rail. */
+#status-line[data-state='offtrack'] {
+  color: var(--gold);
+}
+
+/* Help close button spans the sheet — the one obvious way out. */
+#help-close-button {
+  width: 100%;
+}
+
+.help-note {
+  line-height: 1.65;
+}
+
+/* Finish stats become one inset card instead of three floating numbers. */
+.finish-stats {
+  border: 1px solid rgba(238, 244, 255, 0.1);
+  border-radius: var(--radius-sm);
+  background: rgba(8, 12, 26, 0.5);
+  box-shadow: var(--hairline-soft);
+}
+
+/* P2's gear pill boosts into orange-gold, matching P2's kart identity. */
+.p2-gear.boosting {
+  background-image:
+    linear-gradient(160deg, rgba(52, 34, 8, 0.92), rgba(24, 15, 5, 0.88)),
+    linear-gradient(160deg, rgba(255, 176, 102, 0.95), rgba(255, 138, 31, 0.55));
+  background-origin: padding-box, border-box;
+  background-clip: padding-box, border-box;
+  color: #fff1c4;
+}
+
+/* NITRO wordmark: wider tracking, quieter ink — the bar is the story. */
+.nitro-label span {
+  letter-spacing: 0.22em;
+  color: rgba(230, 238, 255, 0.5);
+}
+
+/* Drift label quiet; the pips and score carry the colour. */
+.drift-label {
+  color: rgba(230, 238, 255, 0.5);
+}
+
+/* Big combo chip: firmer gold rim. */
+.combo-chip.big {
+  border-radius: 12px;
+}
+
+/* Danger alert text pops white off the red pill. */
+.alert-danger {
+  color: #ffe9ee;
+}
+
+/* Wrong-way icon: sharper blink cadence so it reads in peripheral vision. */
+.alert-danger .alert-icon {
+  animation-duration: 0.65s;
+}
+
+/* Touch mode note sits quieter under the mode pills. */
+.mode-note {
+  color: rgba(230, 238, 255, 0.5);
+  font-size: 0.78rem;
+}
+
+/* Pause help line: the ghost button aligns with the Esc hint baseline. */
+#overlay-pause .hint {
+  align-items: center;
+}
+
+/* Focus ring follows the card colours, not the stock blue. */
+.track-btn:focus-visible,
+.car-btn:focus-visible,
+.mode-btn:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* Diff buttons keep their min touch height consistent with toggle-btn. */
+.diff-btn {
+  min-width: 58px;
 }

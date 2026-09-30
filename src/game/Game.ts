@@ -1151,13 +1151,18 @@ export class Game {
     this.updateWrongWay(delta, raceActive);
     this.updateCoach(delta, raceActive);
 
-    // Rank-change flash
+    // Rank-change flash. Suppressed (but still tracked) in the first 2.5s: a
+    // perfect launch drops the player to 4th for one frame — the grid starts
+    // ahead — and that negative banner used to overwrite the 完美起步 reward
+    // banner in the same instant. lastRank1 keeps tracking so the first
+    // *post-launch* overtake still announces itself.
     const rankNow = this.rankOf(this.player1);
-    if (this.phase === 'racing' && rankNow !== this.lastRank1) {
+    const rankChanged = rankNow !== this.lastRank1;
+    if (rankChanged && this.phase === 'racing' && this.raceTime > 2.5) {
       if (rankNow < this.lastRank1) this.hud.showBanner(`↑ 升至第 ${rankNow}`, 'rank');
       else this.hud.showBanner(`↓ 落至第 ${rankNow}`, 'rank');
-      this.lastRank1 = rankNow;
     }
+    if (rankChanged) this.lastRank1 = rankNow;
 
     // Combo window decay
     if (this.comboCount > 0) {
@@ -1716,7 +1721,9 @@ export class Game {
     if (this.inputP1.throttle > 0) {
       this.player1.kart.state.boostTimer = Math.max(this.player1.kart.state.boostTimer, 1.0);
       this.player1.kart.state.isBoosting = true;
-      this.hud.showBanner('完美起步！', 'boost');
+      // 'lap' kind = the gold gradient banner; a perfect launch is a reward,
+      // not a mechanic callout like the cyan boost banner.
+      this.hud.showBanner('完美起步！', 'lap');
       this.audio.whoosh();
       this.emitBoostShock(this.player1);
     }
